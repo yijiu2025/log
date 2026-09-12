@@ -119,11 +119,37 @@ createLogger('pay', {
     name: 'pay',      // 文件名前缀（默认跟随全局 app）
     dir: 'logs',      // 目录，不存在自动创建
     ext: '.log',      // 扩展名，如 .txt
-    date: true,       // 按天滚动；false = 单文件
+    date: true,       // 文件名带日期后缀；false = 单文件
+    dateDir: false,   // 日期作为子目录：logs/2026-09-12/app.log
+    subdir: false,    // 模块子目录：'auto' = 按 tag 首段分类；字符串 = 固定目录名
     error: true,      // 错误文件：true 默认名 / false 关闭 / 字符串自定义前缀
     keepDays: 30      // 保留天数，按天自动清理；0 = 永久保留
   }
 });
+```
+
+### 目录布局（三种，可组合）
+
+默认保持平铺，以上新能力**全部为新增可选**，不改变既有默认行为。
+
+| 模式 | 配置 | 产出 |
+| --- | --- | --- |
+| ① 平铺（默认） | `{}` | `logs/app-2026-09-12.log` |
+| ② 日期目录 | `{ dateDir: true }` | `logs/2026-09-12/app.log` |
+| ③ 模块子目录 | `{ subdir: 'auto' }` | `logs/app-2026-09-12.log`、`logs/firewall/app-2026-09-12.log` |
+| ④ 日期 + 模块（推的二级） | `{ dateDir: true, subdir: 'auto' }` | `logs/2026-09-12/app.log`、`logs/2026-09-12/firewall/app.log` |
+
+`subdir` 三种取值：
+
+- `false` / 不填 —— 不分子目录
+- `'auto'`（或 `true`）—— 自动取 tag 首段作为目录名，`firewall.engine.rule` → `firewall/`
+- 固定字符串 —— 该模块全部写入指定目录，如 `{ subdir: 'infra' }`
+
+```js
+// 每个模块独立文件 + 按 tag 自动分目录 + 日期二级目录
+createLogger('firewall.engine', { file: { subdir: 'auto' } });
+createLogger('oauth21.token',   { file: { name: 'oauth', subdir: 'auto' } });
+configureLog({ file: { dateDir: true } });
 ```
 
 产出文件：
@@ -132,8 +158,12 @@ createLogger('pay', {
 | --- | --- | --- |
 | 主日志 | `<name>-YYYY-MM-DD.log` | 全部级别，JSON 行，按天滚动 |
 | 错误日志 | `<name>-error-YYYY-MM-DD.log` | warn 及以上 |
+| 日期目录模式 | `<dir>/YYYY-MM-DD/<name>.log` | 日期为子目录，文件名不再带日期后缀 |
 
-写入使用 `appendFileSync` 同步落盘，崩溃安全；清理只删除匹配本库命名规则的过期文件。
+写入使用 `appendFileSync` 同步落盘，崩溃安全。清理策略：
+
+- **平铺模式**：只删除匹配本库命名规则的过期**文件**
+- **日期目录模式**：只删除整块的过期 `YYYY-MM-DD` 目录；非日期命名的目录（如 `logs/mydata/`）和当天目录**永不触碰**
 
 ## 环境变量
 
@@ -145,6 +175,8 @@ createLogger('pay', {
 | `LOG_FILE_NAME` | `app` | 主日志文件名前缀 |
 | `LOG_FILE_EXT` | `.log` | 文件扩展名 |
 | `LOG_FILE_DATE` | `true` | 文件名日期后缀（`off` = 单文件） |
+| `LOG_DATE_DIR` | `false` | 日期作为子目录（`on` = `logs/2026-09-12/app.log`） |
+| `LOG_SUBDIR` | 空 | 模块子目录：`auto`/`true` = 按 tag 首段；或固定目录名 |
 | `LOG_ERROR_FILE` | `true` | 错误文件开关 |
 | `LOG_KEEP_DAYS` | `30` | 日志保留天数（`0` = 永久保留） |
 | `LOG_CONSOLE` | `true` | 控制台开关 |

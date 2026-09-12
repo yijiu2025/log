@@ -1,7 +1,7 @@
 {
   "name": "wb-logkit",
-  "version": "0.1.2",
-  "description": "统一日志库：分级(trace/debug/info/warn/error/fatal)、模块级配置、必输/环境/文件矩阵控制、关键词调试、脱敏、requestId 注入、按天滚动文件（Node）/ 控制台自动降级（浏览器）",
+  "version": "0.2.0",
+  "description": "统一日志库：分级(trace/debug/info/warn/error/fatal)、模块级配置、必输/环境/文件矩阵控制、关键词调试、脱敏、requestId 注入、按天/按模块分目录滚动文件（Node）/ 控制台自动降级（浏览器）",
   "type": "module",
   "main": "./src/index.js",
   "module": "./src/index.js",
@@ -43,6 +43,8 @@
     "node",
     "sanitize",
     "zero-dependency",
+    "directory",
+    "rotation",
     "typescript"
   ],
   "license": "MIT"

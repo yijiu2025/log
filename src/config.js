@@ -13,6 +13,11 @@
  * - LOG_FILE_NAME     主日志文件名前缀，默认 app（生成 app-YYYY-MM-DD.log）
  * - LOG_FILE_EXT      文件扩展名，默认 .log
  * - LOG_FILE_DATE     文件名日期后缀，默认 on；off = 单文件不滚动
+ * - LOG_DATE_DIR      日期作为子目录，默认 off（保持平铺）；
+ *                     on = logs/2026-09-12/app.log（文件名不再带日期后缀）
+ * - LOG_SUBDIR        模块子目录，默认不启用；
+ *                     auto/true = 用 tag 首段自动分类（framework.auth.x → framework）；
+ *                     也可填固定目录名（如 LOG_SUBDIR=firewall）
  * - LOG_ERROR_FILE    错误文件开关，默认 on；off = 不单独写错误文件；也可填自定义前缀
  * - LOG_KEEP_DAYS     滚动日志保留天数，默认 30；0 = 关闭过期清理
  * - LOG_CONSOLE       是否输出到控制台，默认 true
@@ -48,6 +53,24 @@ function parseBool(value, defaultValue) {
 function parseBoolOpt(value) {
   if (value === undefined || value === null || value === '') return null;
   return parseBool(value, null);
+}
+
+/**
+ * 解析模块子目录配置（LOG_SUBDIR / 实例 file.subdir）：
+ * - 未配置 / '' / 'off' / 'false' → null（不分子目录）
+ * - 'true' / 'auto'              → true（自动用 tag 首段，如 framework.auth.x → framework）
+ * - 其他字符串                    → 该字符串作为固定子目录名
+ * @returns {string|true|null}
+ */
+function parseSubdirOpt(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value ? true : null;
+  const s = String(value).trim();
+  if (!s) return null;
+  const lower = s.toLowerCase();
+  if (lower === 'off' || lower === 'false' || lower === '0' || lower === 'no') return null;
+  if (lower === 'true' || lower === 'auto' || lower === '1' || lower === 'on') return true;
+  return s;
 }
 
 function parseKeywords(raw, set) {
@@ -118,6 +141,12 @@ function buildConfig() {
     ext: env.LOG_FILE_EXT || '.log',
     // 日期后缀：默认带（YYYY-MM-DD）；LOG_FILE_DATE=off / 实例 file.date=false 时为单文件
     date: parseBoolOpt(env.LOG_FILE_DATE) ?? true,
+    // 日期目录：true 时日期作为子目录（logs/2026-09-12/app.log），文件名不再带日期后缀
+    // LOG_DATE_DIR=true 启用；默认 false 保持旧布局
+    dateDir: parseBool(env.LOG_DATE_DIR, false),
+    // 模块子目录：字符串为固定子目录名（logs/firewall/...）；true = 用 tag 首段自动分类
+    // 默认 null（不分子目录，全部写在同一层）
+    subdir: parseSubdirOpt(env.LOG_SUBDIR),
     // 错误文件：默认另写；LOG_ERROR_FILE=off 或实例 file.error=false 关闭；字符串 = 自定义前缀
     error: parseBoolOpt(env.LOG_ERROR_FILE) ?? true,
     // 保留天数：滚动日志过期自动清理（只删匹配命名模式的文件）；LOG_KEEP_DAYS=0 关闭
@@ -154,13 +183,29 @@ function buildConfig() {
   }
   if (o.ext) cfg.file.ext = o.ext;
   if (typeof o.fileDate === 'boolean') cfg.file.date = o.fileDate;
+  if (typeof o.dateDir === 'boolean') cfg.file.dateDir = o.dateDir;
+  if (o.subdir !== undefined) cfg.file.subdir = parseSubdirOpt(o.subdir);
   if (typeof o.fileError === 'boolean' || typeof o.fileError === 'string') {
     cfg.file.error = o.fileError;
   }
   if (typeof o.console === 'boolean') cfg.consoleEnabled = o.console;
   if (typeof o.file === 'boolean') cfg.fileEnabled = o.file;
   if (o.file && typeof o.file === 'object') {
-    cfg.file = { ...cfg.file, ...o.file };
+    // keepDays 是顶层键，实例对象里也允许写，统一搬到 cfg.file
+    const merged = { ...o.file };
+    if (merged.keepDays !== undefined) {
+      const kd = parseInt(merged.keepDays, 10);
+      if (Number.isFinite(kd) && kd >= 0) cfg.file.keepDays = kd;
+      delete merged.keepDays;
+    }
+    // 三态/枚举键需要归一化，直接展开会把 'auto' / 'off' 等字面量写进配置
+    if (merged.date !== undefined) merged.date = parseBoolOpt(merged.date) ?? true;
+    if (merged.dateDir !== undefined) merged.dateDir = parseBool(merged.dateDir, false);
+    if (merged.subdir !== undefined) merged.subdir = parseSubdirOpt(merged.subdir);
+    if (merged.error !== undefined && typeof merged.error !== 'boolean') {
+      merged.error = parseBoolOpt(merged.error) ?? true;
+    }
+    cfg.file = { ...cfg.file, ...merged };
   }
   if (typeof o.pretty === 'boolean') cfg.pretty = o.pretty;
   if (typeof o.showDev === 'boolean') cfg.showDev = o.showDev;
@@ -198,9 +243,11 @@ export function reloadLogConfig() {
  *   - fileName: 'app'          主日志文件名前缀（仅 Node）
  *   - ext: '.log'              文件扩展名（仅 Node）
  *   - fileDate: true|false     文件名是否带日期后缀（仅 Node）
+ *   - dateDir: true|false      日期作为子目录 logs/2026-09-12/app.log（仅 Node）
+ *   - subdir: 'auto'|'名'|false  模块子目录：'auto'/true = 按 tag 首段自动分类；字符串 = 固定目录名（仅 Node）
  *   - fileError: true|false|'自定义前缀'  错误文件开关/命名（仅 Node）
  *   - keepDays: 30             滚动日志保留天数，0 关闭清理（仅 Node）
- *   - file: true|false|{name?,dir?,ext?,date?,error?,keepDays?}  文件总开关或文件配置对象（合并）
+ *   - file: true|false|{name?,dir?,ext?,date?,dateDir?,subdir?,error?,keepDays?}  文件总开关或文件配置对象（合并）
  *   - console: true|false      控制台总开关
  *   - pretty: true|false       控制台彩色可读 / JSON 行
  *   - showDev: true|false      dev 专属输出显示开关

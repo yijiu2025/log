@@ -19,6 +19,9 @@ export interface LoggerOptions {
    *   - dir：目录（默认跟随全局）
    *   - ext：扩展名（默认 '.log'）
    *   - date：是否带日期后缀（默认 true；false = 单文件不按天滚动）
+   *   - dateDir：日期作为子目录 `<dir>/<日期>/`（默认 false）；启用后文件名不带日期后缀
+   *   - subdir：模块子目录。'auto'/true = 按 tag 首段自动分类；字符串 = 固定目录名
+   *   - keepDays：本模块滚动日志保留天数（0 = 不清理）
    *   - error：错误文件开关（默认 true）或自定义前缀字符串
    */
   file?: boolean | {
@@ -26,6 +29,9 @@ export interface LoggerOptions {
     dir?: string;
     ext?: string;
     date?: boolean;
+    dateDir?: boolean;
+    subdir?: string | boolean;
+    keepDays?: number;
     error?: boolean | string;
   };
   /** true = 本模块 debug/trace 免关键词直通；false = 强制静默 */
@@ -69,13 +75,21 @@ export interface LogGlobalOptions {
   fileName?: string;
   ext?: string;
   fileDate?: boolean;
+  /** 日期作为子目录（logs/2026-09-12/app.log），启用后文件名不带日期后缀 */
+  dateDir?: boolean;
+  /** 模块子目录：'auto'/true = 按 tag 首段自动分类；字符串 = 固定目录名；false = 关闭 */
+  subdir?: string | boolean;
   fileError?: boolean | string;
+  keepDays?: number;
   console?: boolean;
   file?: boolean | {
     name?: string;
     dir?: string;
     ext?: string;
     date?: boolean;
+    dateDir?: boolean;
+    subdir?: string | boolean;
+    keepDays?: number;
     error?: boolean | string;
   };
   pretty?: boolean;

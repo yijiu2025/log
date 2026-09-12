@@ -1,21 +1,31 @@
 /**
- * Node 文件通道：JSON 行、按天滚动、文件命名全可配、过期自动清理
+ * Node 文件通道：JSON 行、按天滚动、目录分层、文件命名全可配、过期自动清理
  *
  * 仅由 index.node.js（Node 入口）注入；浏览器不会打包此文件。
  *
  * 同步写入（appendFileSync）：本库面向中小服务量级，同步开销可忽略，
  * 换取进程崩溃不丢日志 + 写入立即可见（测试/退出语义简单）。
  *
- * 文件命名（可经全局 configureLog({ file }) 或实例 file:{...} 覆盖）：
+ * ── 目录布局（三种，可组合）─────────────────────────────────
+ *   平铺（默认）          logs/app-2026-09-12.log
+ *   日期目录 dateDir      logs/2026-09-12/app.log
+ *   模块子目录 subdir     logs/firewall/app-2026-09-12.log
+ *   两者组合              logs/2026-09-12/firewall/app.log
+ *
+ *   dateDir=true 时日期由"文件名后缀"变为"子目录"，文件名回归 <name><ext>。
+ *   subdir 为字符串时用该固定名；为 true 时用 tag 首段（framework.auth.x → framework）。
+ *
+ * ── 文件命名 ────────────────────────────────────────────────
  *   <name>[-YYYY-MM-DD]<ext>        主日志（全部级别）
  *   <errorBase>[-YYYY-MM-DD]<ext>   错误文件（warn 及以上；error:false 关闭，
  *                                   error:'自定义前缀' 指定名称；默认规则：
  *                                   全局默认前缀时为 error，自定义前缀 name 时为 <name>-error）
  *
- * 保留天数（keepDays，默认 30）：
- *   每天首次写入时清理目录中"日志命名模式"的过期文件（按文件名中的日期判断，
- *   只删除与当前写入模式匹配的 <前缀>-YYYY-MM-DD<ext>，不碰任何其他文件）。
- *   keepDays: 0 或 false 关闭清理。
+ * ── 保留天数（keepDays，默认 30）────────────────────────────
+ *   每天首次写入时清理过期的日志文件（按文件名中的日期判断）：
+ *   - 平铺模式：只删匹配 <前缀>-YYYY-MM-DD<ext> 的文件
+ *   - 日期目录模式：只删日期目录（整目录移除），不碰目录内非本库文件
+ *   绝不涉及任何不符合本库命名规则的路径。keepDays: 0 或 false 关闭清理。
  *
  * @author yijiu2025
  * @since 2026-09-11
@@ -98,23 +108,95 @@ class NodeFileTransport {
   }
 
   /**
+   * 日期目录模式下清理过期的日期目录（整目录移除）。
+   * 只扫描 <baseDir> 下形如 YYYY-MM-DD 的目录名，且日期早于保留期才删；
+   * 目录名不匹配（如用户自建的 other/）一律不动。
+   * 整块删除，连同其下所有模块子目录（logs/2020-01-01/a、logs/2020-01-01/b 一并清理）。
+   * @param {string} baseDir 基础目录（如 logs）
+   * @param {number} keepDays 保留天数（<=0 关闭）
+   * @param {string} today 当天日期串（避免误删当天目录）
+   */
+  _cleanupDateDirs(baseDir, keepDays, today) {
+    if (!keepDays || keepDays <= 0) return;
+    const cutoffStr = new Date(Date.now() - keepDays * 86400000).toLocaleDateString('sv-SE');
+    const dateDirRe = /^\d{4}-\d{2}-\d{2}$/;
+
+    const absBase = path.resolve(process.cwd(), baseDir);
+    let entries;
+    try {
+      entries = fs.readdirSync(absBase, { withFileTypes: true });
+    } catch {
+      return; // 基础目录不存在：跳过
+    }
+
+    for (const ent of entries) {
+      if (!ent.isDirectory() || !dateDirRe.test(ent.name)) continue;
+      if (ent.name >= cutoffStr) continue; // 未过期（含当天）
+      try {
+        fs.rmSync(path.join(absBase, ent.name), { recursive: true, force: true });
+      } catch {
+        /* 删除失败（占用/权限）：留待下次 */
+      }
+    }
+  }
+
+  /**
+   * 解析模块子目录名。
+   * @param {string|true|null} subdir 配置值：字符串=固定名；true=用 tag 首段；null=不分子目录
+   * @param {string} tag 该条日志的模块 tag
+   * @returns {string|null}
+   */
+  _resolveSubdir(subdir, tag) {
+    if (!subdir) return null;
+    if (subdir === true) {
+      const seg = String(tag || '')
+        .split('.')[0]
+        .trim();
+      return seg || null;
+    }
+    return String(subdir);
+  }
+
+  /**
+   * 拼接最终写入目录（相对 cwd）：base / [日期目录] / [模块子目录]
+   * @param {string} baseDir 基础目录（如 logs）
+   * @param {boolean} dateDir 是否用日期目录
+   * @param {string|null} subdir 模块子目录
+   * @param {string} today 当天日期串 YYYY-MM-DD
+   */
+  _buildDir(baseDir, dateDir, subdir, today) {
+    const parts = [baseDir];
+    if (dateDir) parts.push(today);
+    if (subdir) parts.push(subdir);
+    return parts.join('/');
+  }
+
+  /**
    * @param {object} record
    * @param {object} cfg getLogConfig() 结果
    * @param {boolean} [sync=false] 兼容参数（本通道本就同步写入）
-   * @param {object|null} [fileOpts=null] 实例级文件配置 { name?, dir?, ext?, date?, error?, keepDays? }
+   * @param {object|null} [fileOpts=null] 实例级文件配置
+   *        { name?, dir?, ext?, date?, dateDir?, subdir?, error?, keepDays? }
    */
   write(record, cfg, sync = false, fileOpts = null) {
     if (!cfg.fileEnabled) return;
     const gf = cfg.file ?? {};
-    const dir = fileOpts?.dir ?? gf.dir ?? 'logs';
+    const baseDir = fileOpts?.dir ?? gf.dir ?? 'logs';
     const name = fileOpts?.name ?? gf.name ?? 'app';
     const ext = fileOpts?.ext ?? gf.ext ?? '.log';
     const useDate = fileOpts?.date ?? gf.date ?? true;
-    const dateSuffix = useDate ? `-${fileDateString()}` : '';
+    const useDateDir = fileOpts?.dateDir ?? gf.dateDir ?? false;
+    const subdirOpt = fileOpts?.subdir !== undefined ? fileOpts.subdir : (gf.subdir ?? null);
     const errorOpt = fileOpts?.error ?? gf.error ?? true;
     const keepDays = fileOpts?.keepDays ?? gf.keepDays ?? 30;
     const isGlobalDefaultName = !fileOpts?.name && (gf.name ?? 'app') === 'app';
 
+    const today = fileDateString();
+    const subdir = this._resolveSubdir(subdirOpt, record.tag);
+    const dir = this._buildDir(baseDir, useDateDir, subdir, today);
+
+    // 平铺模式：日期作为文件名后缀；日期目录模式：文件名不再带日期
+    const dateSuffix = useDate && !useDateDir ? `-${today}` : '';
     const mainFile = `${name}${dateSuffix}${ext}`;
     const errBase = resolveErrorBase(errorOpt, name, isGlobalDefaultName);
 
@@ -126,7 +208,6 @@ class NodeFileTransport {
       }
 
       // 过期清理：仅在按天滚动模式下有意义；跨天重置账本，每个目录+前缀组合清一次
-      const today = fileDateString();
       if (useDate) {
         if (today !== this.lastWriteDate) {
           this.lastWriteDate = today;
@@ -135,7 +216,11 @@ class NodeFileTransport {
         const cleanKey = `${dir}|${name}|${errBase}|${ext}`;
         if (!this.cleanedKeys.has(cleanKey)) {
           this.cleanedKeys.add(cleanKey);
-          this._cleanup(dir, [name, errBase], ext, keepDays);
+          if (useDateDir) {
+            this._cleanupDateDirs(baseDir, keepDays, today);
+          } else {
+            this._cleanup(dir, [name, errBase], ext, keepDays);
+          }
         }
       }
     } catch {
