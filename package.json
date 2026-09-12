@@ -1,0 +1,49 @@
+{
+  "name": "wb-log",
+  "version": "0.1.0",
+  "description": "统一日志库：分级(trace/debug/info/warn/error/fatal)、模块级配置、必输/环境/文件矩阵控制、关键词调试、脱敏、requestId 注入、按天滚动文件（Node）/ 控制台自动降级（浏览器）",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "node": {
+        "import": "./src/index.node.js"
+      },
+      "default": {
+        "import": "./src/index.js"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yijiu2025/log.git"
+  },
+  "homepage": "https://github.com/yijiu2025/log#readme",
+  "bugs": {
+    "url": "https://github.com/yijiu2025/log/issues"
+  },
+  "keywords": [
+    "log",
+    "logger",
+    "logging",
+    "universal",
+    "browser",
+    "node",
+    "sanitize",
+    "zero-dependency",
+    "typescript"
+  ],
+  "license": "MIT"
+}
