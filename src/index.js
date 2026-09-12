@@ -4,11 +4,11 @@
  * ════════════════════════════════════════════════════════════════
  *  快速上手
  * ════════════════════════════════════════════════════════════════
- *   import { createLogger } from 'wb-log';
+ *   import { createLogger } from '@qirly/wb-log';
  *   const log = createLogger('auth.session');   // tag 建议 = 文件路径点分
  *
  *  零配置快捷用法（不建 logger，直接打印）：
- *   import { log } from 'wb-log';
+ *   import { log } from '@qirly/wb-log';
  *   log.info('...'); log.error('...');           // tag='app'，跟随全局配置
  *   log.config({ level: 'debug' });              // 也可对默认 logger 做配置
  *
@@ -30,11 +30,11 @@
  *   log.config({ level: 'warn' });              // 运行时更新
  *
  *  全局编程配置：
- *   import { configureLog } from 'wb-log';
+ *   import { configureLog } from '@qirly/wb-log';
  *   configureLog({ level: 'warn', fileName: 'server', debugKeywords: ['auth'] });
  *
  *  CLI 工具面向用户的结果输出用 stdout（无时间戳装饰）：
- *   import { logStdout as stdout } from 'wb-log';
+ *   import { logStdout as stdout } from '@qirly/wb-log';
  *   stdout('✔ 完成');
  *
  * ════════════════════════════════════════════════════════════════
@@ -81,7 +81,7 @@ export function createLogger(tag, options = null) {
 export const logger = createLogger('app');
 
 /**
- * 零配置快捷入口：`import { log } from 'wb-log'` 直接打印，
+ * 零配置快捷入口：`import { log } from '@qirly/wb-log'` 直接打印，
  * 无需 createLogger（等价于默认 logger，tag='app'，跟随全局配置）。
  */
 export { logger as log };
@@ -100,7 +100,7 @@ export { sanitizeForLog, sanitizeUrl, sanitizeUserAgent };
 export { AppLogger };
 
 /**
- * 兼容旧 API：`import Logger from 'wb-log'` 后 Logger.info(...) 静态调用。
+ * 兼容旧 API：`import Logger from '@qirly/wb-log'` 后 Logger.info(...) 静态调用。
  * 内部委托给默认 logger（tag='app'）。
  */
 class Logger {

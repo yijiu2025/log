@@ -2,7 +2,7 @@
  * Logger 核心：console 兼容的变参签名 + tag 化 debug 白名单 + 实例级配置
  *
  * 用法：
- *   import { createLogger } from 'wb-log';
+ *   import { createLogger } from '@qirly/wb-log';
  *   const log = createLogger('auth.session');
  *
  *   log.info('用户登录', { userId: 1 });        // 对象入 data

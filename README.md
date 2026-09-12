@@ -2,8 +2,8 @@
 
 > 零依赖、Node / 浏览器通用的统一日志库。分级输出 · 必输/环境/文件矩阵控制 · 关键词调试 · 模块级配置 · 自动脱敏 · 按天滚动文件。
 
-[![npm version](https://img.shields.io/npm/v/wb-log.svg)](https://www.npmjs.com/package/wb-log)
-[![license](https://img.shields.io/npm/l/wb-log.svg)](./LICENSE)
+[![npm version](https://img.shields.io/npm/v/@qirly/wb-log.svg)](https://www.npmjs.com/package/@qirly/wb-log)
+[![license](https://img.shields.io/npm/l/@qirly/wb-log.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/wb-log.svg)](https://nodejs.org)
 
 ## 安装
@@ -19,7 +19,7 @@ npm install wb-log
 ## 快速开始
 
 ```js
-import { createLogger } from 'wb-log';
+import { createLogger } from '@qirly/wb-log';
 
 // tag 建议 = 文件路径的点分形式，便于按模块过滤
 const log = createLogger('auth.session');
@@ -33,7 +33,7 @@ log.debug('缓存未命中', key);          // 调试：默认静默，需关键
 不想建 logger？直接打印：
 
 ```js
-import { log } from 'wb-log';
+import { log } from '@qirly/wb-log';
 
 log.info('直接打印');                  // 等价于 createLogger('app')
 log.config({ level: 'debug' });        // 同样支持运行时配置
@@ -98,7 +98,7 @@ log.config({ level: 'warn' });  // 运行时热更新，返回自身可链式调
 //    LOG_FILE_CLI=false         cli 模块不写文件
 
 // ③ 全局
-import { configureLog } from 'wb-log';
+import { configureLog } from '@qirly/wb-log';
 configureLog({
   level: 'warn',
   file: { name: 'server', date: false },
@@ -160,7 +160,7 @@ createLogger('pay', {
 包通过 `package.json` 的 `exports` 条件路由自动区分环境（`node` → 含文件通道，`default` → 纯浏览器安全）：
 
 ```js
-import { createLogger } from 'wb-log';
+import { createLogger } from '@qirly/wb-log';
 
 const log = createLogger('app.user');
 log.info('hello');                    // 正常输出
@@ -176,7 +176,7 @@ log.file.info('仅 Node 生效');         // 浏览器中安全 no-op
 - **上下文注入**：`setLogContextProvider()` 可注入 `requestId` / `userId`，请求内日志自动携带
 - **Error 提取**：传入 `Error` 自动提取 `message` + `stack`
 - **计时器**：`const done = log.time('dbQuery'); ...; done();` 自动输出耗时
-- **原始输出**：`import { logStdout as stdout } from 'wb-log'` 无时间戳装饰，适合 CLI 结果展示
+- **原始输出**：`import { logStdout as stdout } from '@qirly/wb-log'` 无时间戳装饰，适合 CLI 结果展示
 
 ## API 速查
 
