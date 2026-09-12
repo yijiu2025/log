@@ -1,5 +1,5 @@
 /**
- * wb-log Node 入口：静态注入文件通道（按天滚动、过期清理）
+ * wb-logkit Node 入口：静态注入文件通道（按天滚动、过期清理）
  *
  * package.json exports 按 conditions 路由：
  *   - Node（require/import）→ 本文件：带文件通道的完整能力

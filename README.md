@@ -1,15 +1,15 @@
-# wb-log
+# wb-logkit
 
 > 零依赖、Node / 浏览器通用的统一日志库。分级输出 · 必输/环境/文件矩阵控制 · 关键词调试 · 模块级配置 · 自动脱敏 · 按天滚动文件。
 
-[![npm version](https://img.shields.io/npm/v/wb-logkit.svg)](https://www.npmjs.com/package/wb-logkitkit)
+[![npm version](https://img.shields.io/npm/v/wb-logkit.svg)](https://www.npmjs.com/package/wb-logkit)
 [![license](https://img.shields.io/npm/l/wb-logkit.svg)](./LICENSE)
-[![node](https://img.shields.io/node/v/wb-log.svg)](https://nodejs.org)
+[![node](https://img.shields.io/node/v/wb-logkit.svg)](https://nodejs.org)
 
 ## 安装
 
 ```bash
-npm install wb-log
+npm install wb-logkit
 ```
 
 - **零运行时依赖**，仅使用 Node 内置模块（浏览器环境自动降级）
