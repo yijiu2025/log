@@ -26,10 +26,12 @@ const MASK = '***';
  * 对对象进行日志脱敏
  * @param {object} obj - 要脱敏的对象
  * @param {number} depth - 递归深度限制
- * @returns {object} 脱敏后的对象副本
+ * @returns {object} 脱敏后的对象副本；超过深度限制的部分返回 '[maxDepth]' 占位符
+ *                   （绝不透传未脱敏的原始对象，防止深层敏感字段泄露）
  */
 function sanitizeForLog(obj, depth = 3) {
-  if (depth <= 0 || !obj || typeof obj !== 'object') return obj;
+  if (!obj || typeof obj !== 'object') return obj;
+  if (depth <= 0) return '[maxDepth]';
 
   if (Array.isArray(obj)) {
     return obj.map(item => sanitizeForLog(item, depth - 1));

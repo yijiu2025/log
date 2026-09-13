@@ -30,6 +30,7 @@
  */
 import { LEVELS, getLogConfig, isDebugTagEnabled, matchModuleRule } from './config.js';
 import { getLogContext } from './context.js';
+import { safeStringify } from './safe-stringify.js';
 import { sanitizeForLog } from './sanitize.js';
 import { consoleTransport, fileTransport } from './transports.js';
 
@@ -81,7 +82,8 @@ function parseArgs(args) {
       continue;
     }
     if (Array.isArray(arg)) {
-      parts.push(JSON.stringify(sanitizeForLog(arg)));
+      // safeStringify：数组元素含循环引用/BigInt 时 JSON.stringify 会抛异常
+      parts.push(safeStringify(sanitizeForLog(arg)));
       continue;
     }
     parts.push(String(arg));
@@ -239,6 +241,26 @@ export class AppLogger {
    * @param {object|boolean} [opts] true=强制输出；或 { force, env, fileOnly, sync }
    */
   _emit(level, args, opts = {}) {
+    // 整体兜底：日志库自身故障（参数不可序列化、序列化意外抛错等）绝不波及业务代码
+    try {
+      this._emitInner(level, args, opts);
+    } catch (err) {
+      try {
+        // 尽力向 stderr 裸写一条降级提示；浏览器退回 console.error
+        const line = `[wb-logkit] 日志输出失败(level=${level}): ${err?.message ?? err}\n`;
+        if (typeof process !== 'undefined' && process.stderr?.write) {
+          process.stderr.write(line);
+        } else {
+          globalThis.console.error(line);
+        }
+      } catch {
+        // 降级提示也失败：彻底放弃，不再抛出
+      }
+    }
+  }
+
+  /** @private _emit 的实际执行体（异常由 _emit 兜底捕获） */
+  _emitInner(level, args, opts = {}) {
     const {
       force = false,
       env = null,

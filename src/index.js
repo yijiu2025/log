@@ -65,6 +65,7 @@ import {
   matchModuleRule
 } from './config.js';
 import { setLogContextProvider } from './context.js';
+import { safeStringify } from './safe-stringify.js';
 import { stdout } from './transports.js';
 import { sanitizeForLog, sanitizeUrl, sanitizeUserAgent } from './sanitize.js';
 
@@ -97,6 +98,7 @@ export {
   setLogContextProvider
 };
 export { sanitizeForLog, sanitizeUrl, sanitizeUserAgent };
+export { safeStringify };
 export { AppLogger };
 
 /**

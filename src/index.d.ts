@@ -123,6 +123,8 @@ export declare const stdout: (text: unknown) => void;
 export declare function sanitizeForLog<T>(obj: T, depth?: number): T;
 export declare function sanitizeUrl(url: string): string;
 export declare function sanitizeUserAgent(ua: string): string;
+/** 安全序列化：循环引用/BigInt/Symbol 等任何输入都不抛异常 */
+export declare function safeStringify(value: unknown, space?: number | string): string;
 export declare const AppLogger: new (tag?: string, options?: LoggerOptions | null) => AppLogger;
 
 /** 兼容旧 API：静态调用委托给默认 logger */

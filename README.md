@@ -204,7 +204,8 @@ log.file.info('仅 Node 生效');         // 浏览器中安全 no-op
 
 ## 内置能力
 
-- **自动脱敏**：`password` / `token` / `secret` / `key` / `cookie` 等字段递归（3 层）输出为 `***`
+- **自动脱敏**：`password` / `token` / `secret` / `key` / `cookie` 等字段递归（3 层）输出为 `***`；超过 3 层的嵌套部分整体替换为 `[maxDepth]` 占位符，绝不透传未脱敏的原始对象
+- **永不抛异常**：日志调用自身绝不把错误抛进业务代码——循环引用、BigInt、Symbol 等经 `safeStringify` 安全序列化（`[Circular]` / `123n` / `Symbol(x)`），序列化意外失败时兜底写 stderr 降级提示
 - **上下文注入**：`setLogContextProvider()` 可注入 `requestId` / `userId`，请求内日志自动携带
 - **Error 提取**：传入 `Error` 自动提取 `message` + `stack`
 - **计时器**：`const done = log.time('dbQuery'); ...; done();` 自动输出耗时
@@ -236,6 +237,7 @@ src/
 ├── transports.js           # 控制台通道 + 文件通道注入器
 ├── file-transport.node.js  # Node 文件通道（同步落盘、按天滚动、按天清理）
 ├── context.js              # 上下文提供器（requestId 注入）
+├── safe-stringify.js       # 安全序列化（循环引用/BigInt 永不抛异常）
 └── sanitize.js             # 日志脱敏
 ```
 

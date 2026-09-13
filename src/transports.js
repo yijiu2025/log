@@ -10,6 +10,8 @@
  * @since 2026-09-11
  */
 
+import { safeStringify } from './safe-stringify.js';
+
 const isNode = typeof process !== 'undefined' && !!process.versions?.node;
 
 const LEVEL_COLORS = { trace: 90, debug: 90, info: 32, warn: 33, error: 31, fatal: 35 };
@@ -42,9 +44,9 @@ function buildExtraPayload(record) {
   for (const [k, v] of Object.entries(record)) {
     if (!reserved.has(k)) payload[k] = v;
   }
-  let str = Object.keys(payload).length ? JSON.stringify(payload) : '';
+  let str = Object.keys(payload).length ? safeStringify(payload) : '';
   if (record.err && !record.err.stack) {
-    str = `${str ? `${str} ` : ''}err=${JSON.stringify(record.err)}`;
+    str = `${str ? `${str} ` : ''}err=${safeStringify(record.err)}`;
   }
   return str;
 }
@@ -73,7 +75,7 @@ const consoleTransport = {
     if (!cfg.consoleEnabled) return;
     try {
       const isError = record.level === 'error' || record.level === 'fatal';
-      const line = cfg.pretty ? formatPretty(record) : JSON.stringify(record);
+      const line = cfg.pretty ? formatPretty(record) : safeStringify(record);
       if (isNode) {
         const target = isError ? process.stderr : process.stdout;
         target.write(line + '\n');

@@ -33,6 +33,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { safeStringify } from './safe-stringify.js';
 
 /** 本地日期字符串 YYYY-MM-DD（用于文件滚动） */
 function fileDateString() {
@@ -200,7 +201,7 @@ class NodeFileTransport {
     const mainFile = `${name}${dateSuffix}${ext}`;
     const errBase = resolveErrorBase(errorOpt, name, isGlobalDefaultName);
 
-    const line = JSON.stringify(record) + '\n';
+    const line = safeStringify(record) + '\n';
     try {
       this._append(dir, mainFile, line);
       if ((record.level === 'warn' || record.level === 'error' || record.level === 'fatal') && errorOpt !== false) {
