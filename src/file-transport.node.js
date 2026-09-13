@@ -117,6 +117,31 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** ANSI 颜色码（兼容存量业务在 msg 里拼接的 C.* 颜色段；ESC 控制字符为本规则的正当用途） */
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+/**
+ * 递归剥离对象字符串字段中的 ANSI 颜色码（原地修改）。
+ * 必须在 JSON.stringify 之前做：JSON 会把 ESC 控制字符转义成 \u001b，
+ * 序列化后的字符串上正则匹配不到。
+ * @param {object} value - 任意对象（record，调用侧私有副本，可原地修改）
+ * @param {number} [depth=4] - 递归深度限制
+ * @returns {object} 同一对象
+ */
+function stripAnsiDeep(value, depth = 4) {
+  if (depth <= 0 || !value || typeof value !== 'object') return value;
+  for (const k of Object.keys(value)) {
+    const v = value[k];
+    if (typeof v === 'string') {
+      value[k] = v.replace(ANSI_RE, '');
+    } else if (v && typeof v === 'object') {
+      stripAnsiDeep(v, depth - 1);
+    }
+  }
+  return value;
+}
+
 class NodeFileTransport {
   constructor() {
     /** 相对目录 → 已确认创建的绝对路径（避免每条日志都 resolve + mkdirSync） */
@@ -316,6 +341,10 @@ class NodeFileTransport {
     const mainFile = `${name}${suffixPart}${dateSuffix}${ext}`;
     const errBase = resolveErrorBase(errorOpt, name, isGlobalDefaultName);
 
+    // 剥离 ANSI 颜色码：文件保持纯文本 JSONL（全文检索友好）；
+    // 控制台通道不受影响（TTY 上 pretty 模式的颜色照常渲染）。
+    // record 为本次 emit 私有对象（console 通道已先写完），原地剥离安全
+    stripAnsiDeep(record);
     const line = safeStringify(record) + '\n';
     try {
       this._append(dir, mainFile, line);
