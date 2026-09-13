@@ -247,7 +247,7 @@ export class AppLogger {
     } catch (err) {
       try {
         // 尽力向 stderr 裸写一条降级提示；浏览器退回 console.error
-        const line = `[wb-logkit] 日志输出失败(level=${level}): ${err?.message ?? err}\n`;
+        const line = `❌ [wb-logkit] 日志输出失败(level=${level}): ${err?.message ?? err}\n`;
         if (typeof process !== 'undefined' && process.stderr?.write) {
           process.stderr.write(line);
         } else {
