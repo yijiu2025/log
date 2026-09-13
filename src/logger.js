@@ -35,11 +35,14 @@ import { safeStringify } from './safe-stringify.js';
 import { sanitizeForLog } from './sanitize.js';
 import { consoleTransport, fileTransport } from './transports.js';
 
-/** 单条字段字符串长度上限之外的超长标记后缀模板 */
+/** 超长字符串截断后的标记模板（%d 会被替换为原始长度） */
 const TRUNCATE_MARK = '…(len=%d)';
 
-/** 本地时间 ISO 8601 字符串（含时区偏移，如 2026-09-13T23:30:00.123+08:00）。
- * 与文件滚动日期（本地时区）保持同一基准，避免跨午夜时文件名与内容时间对不上 */
+/**
+ * 生成当前时间的本地时区 ISO 8601 字符串（如 2026-09-13T23:30:00.123+08:00）。
+ * 与文件滚动日期（本地时区）保持同一基准，避免跨午夜时文件名与内容时间对不上。
+ * @returns {string} 含时区偏移的本地 ISO 时间串（可被 new Date() 直接解析）
+ */
 function localIsoTime() {
   const d = new Date();
   const p = (n, w = 2) => String(n).padStart(w, '0');
@@ -54,10 +57,10 @@ function localIsoTime() {
 
 /**
  * 递归截断 record 中的超长字符串（外部输入兜底防护，防单条日志撑爆文件）。
- * 原地修改并返回 record；maxStr <= 0 表示关闭截断。
- * @param {object} obj 日志记录对象（调用前刚组装完，无外部引用）
- * @param {number} max 单字段字符串长度上限
- * @param {number} [depth] 递归深度限制
+ * @param {object} obj - 日志记录对象（调用前刚组装完，无外部引用，允许原地修改）
+ * @param {number} max - 单字段字符串长度上限；<=0 时跳过截断
+ * @param {number} [depth=4] - 递归深度限制（防深层嵌套对象遍历过深）
+ * @returns {object} 截断后的同一 record（原地修改）
  */
 function truncateStrings(obj, max, depth = 4) {
   if (max <= 0 || depth <= 0 || !obj || typeof obj !== 'object') return obj;
@@ -72,7 +75,11 @@ function truncateStrings(obj, max, depth = 4) {
   return obj;
 }
 
-/** 是否为可展开合并的普通对象 */
+/**
+ * 判断值是否为可展开合并进 data 的普通对象。
+ * @param {*} value - 任意值
+ * @returns {boolean} true = null/数组/Error/Date 之外的纯对象（可浅合并）
+ */
 function isPlainObject(value) {
   return (
     value !== null &&
@@ -85,10 +92,13 @@ function isPlainObject(value) {
 
 /**
  * 解析 console 风格的变参 → { msg, data, err }
- * - Error      → err（取第一个，后续 Error 并入 data._errN）
+ * - Error      → err（取第一个，后续 Error 并入 data._extra_errors）
  * - 普通对象   → 浅合并进 data（递归脱敏）
  * - Date/数组  → 序列化为字符串
  * - 其他       → 空格拼接到 msg
+ * @param {Array} args - 日志方法的原始变参（如 log.info('a', {b:1}, err) 的 arguments）
+ * @returns {{msg: string, data: object, err: (Error|undefined)}} msg 为拼接后的消息
+ *          （无显式消息且带 Error 时取 err.message），data 为脱敏合并后的业务字段，err 取第一个 Error
  */
 function parseArgs(args) {
   const parts = [];
@@ -130,7 +140,16 @@ function parseArgs(args) {
   return { msg, data, err };
 }
 
-/** 组装最终 record：固定字段在前，业务 data 冲突时整体让位到 data 键下 */
+/**
+ * 组装最终 record：固定字段在前，业务 data 命中保留键时整体让位到 data 键下；
+ * ctx（requestId/userId 等）注入但绝不覆盖核心字段；最后做超长字符串兜底截断。
+ * @param {string} tag - 模块标签（点分路径，如 'auth.session'）
+ * @param {string} level - 本条日志级别
+ * @param {string} msg - 解析后的消息
+ * @param {object} data - 解析合并后的业务数据（已脱敏）
+ * @param {Error|undefined} err - 第一个 Error 实参
+ * @returns {object} 完整日志记录 { t, level, tag, msg, ...data|data, ...ctx, err? }
+ */
 function buildRecord(tag, level, msg, data, err) {
   const ctx = getLogContext();
   const record = { t: localIsoTime(), level, tag, msg };
@@ -162,8 +181,9 @@ function buildRecord(tag, level, msg, data, err) {
 
 export class AppLogger {
   /**
-   * @param {string} tag 模块标签（一般是点分路径，如 'auth.session'）
-   * @param {object} [options] 实例级配置（优先级最高）
+   * 创建模块 logger 实例。
+   * @param {string} [tag='app'] 模块标签（一般是点分路径，如 'auth.session'）
+   * @param {object|null} [options=null] 实例级配置（优先级最高）
    *   - level: 'info'                    本模块最低级别
    *   - console: true|false              本模块控制台开关
    *   - file: true|false|{...}           本模块文件开关 / 独立文件配置（仅 Node）
@@ -190,8 +210,9 @@ export class AppLogger {
   }
 
   /**
-   * 运行时更新本实例配置（返回自身，可链式）
-   * @param {object} patch 同构造函数 options
+   * 运行时更新本实例配置（清空变体缓存后立即生效）。
+   * @param {object} [patch={}] 同构造函数 options 的部分字段
+   * @returns {AppLogger} 自身，可链式调用
    * @example log.config({ level: 'warn', file: { name: 'audit' } });
    */
   config(patch = {}) {
@@ -204,9 +225,11 @@ export class AppLogger {
    * 构建"环境变体"：一个可调用对象（默认 info 级），同时携带全部级别方法，
    * 以及 always/dev/prod/file 组合选择器（顺序无关，后选覆盖前者）。
    *
-   * @param {'dev'|'prod'|null} env 环境门控；null = 不限环境
-   * @param {boolean} force true = 必输（绕过 LOG_LEVEL 与 LOG_DEBUG 门控）
-   * @param {boolean} fileOnly true = 只写文件、不进控制台
+   * @param {'dev'|'prod'|null} env - 环境门控；null = 不限环境
+   * @param {boolean} force - true = 必输（绕过 LOG_LEVEL 与 LOG_DEBUG 门控）
+   * @param {boolean} fileOnly - true = 只写文件、不进控制台
+   * @returns {Function} 可调用变体：fn(...args) = info 级；fn.trace~fn.fatal 指定级别；
+   *          fn.always / fn.dev / fn.prod / fn.file 为 getter，返回组合后的新变体
    */
   _variant(env, force, fileOnly) {
     const key = `${env ?? '*'}|${force ? 1 : 0}|${fileOnly ? 1 : 0}`;
@@ -234,39 +257,73 @@ export class AppLogger {
     return fn;
   }
 
-  /** 派生子 logger：createLogger('auth').child('session') → tag 'auth.session'（继承实例配置） */
+  /**
+   * 派生子 logger（继承本实例配置）。
+   * @param {string} sub - 子段名，如 createLogger('auth').child('session') → tag 'auth.session'
+   * @returns {AppLogger} 新实例（options 浅拷贝，互不影响）
+   */
   child(sub) {
     return new AppLogger(`${this.tag}.${sub}`, this.options ? { ...this.options } : null);
   }
 
+  /**
+   * 追踪级日志：最详细；门控同 debug（LOG_DEBUG 关键词白名单 + LOG_LEVEL 门槛）。
+   * @param {...*} args - 变参，解析规则见 parseArgs
+   * @returns {void}
+   */
   trace(...args) {
     this._emit('trace', args);
   }
 
-  /** 调试日志：仅当 LOG_DEBUG 关键词命中本 tag（或实例 debug:true）时输出 */
+  /**
+   * 调试日志：仅当 LOG_DEBUG 关键词命中本 tag（或实例 debug:true）时输出。
+   * @param {...*} args - 变参，解析规则见 parseArgs
+   * @returns {void}
+   */
   debug(...args) {
     this._emit('debug', args);
   }
 
+  /**
+   * 信息日志：默认级别，受 LOG_LEVEL 门槛控制。
+   * @param {...*} args - 变参，解析规则见 parseArgs
+   * @returns {void}
+   */
   info(...args) {
     this._emit('info', args);
   }
 
+  /**
+   * 警告日志：同时写入错误文件（Node）。
+   * @param {...*} args - 变参，解析规则见 parseArgs
+   * @returns {void}
+   */
   warn(...args) {
     this._emit('warn', args);
   }
 
+  /**
+   * 错误日志：走 stderr（Node），同时写入错误文件。
+   * @param {...*} args - 变参，Error 实参自动提取 name/message/stack
+   * @returns {void}
+   */
   error(...args) {
     this._emit('error', args);
   }
 
-  /** 最严重级别：进程级故障，文件通道同步写避免丢失 */
+  /**
+   * 最严重级别：进程级故障，必输（绕过全部门控），文件通道同步写避免崩溃丢失。
+   * @param {...*} args - 变参，解析规则见 parseArgs
+   * @returns {void}
+   */
   fatal(...args) {
     this._emit('fatal', args, { force: true });
   }
 
   /**
-   * 计时工具
+   * 计时工具。
+   * @param {string} [label='timer'] - 计时标签（进 msg）
+   * @returns {Function} 结束函数：调用时以 info 级输出 { ms: 耗时 }
    * @example const done = log.time('dbQuery'); ... ; done(); // 自动 info 耗时
    */
   time(label = 'timer') {
@@ -275,12 +332,15 @@ export class AppLogger {
   }
 
   /**
-   * @param {string} level
-   * @param {Array} args
-   * @param {object|boolean} [opts] true=强制输出；或 { force, env, fileOnly }
+   * 统一发送入口：门控判定 → 变参解析 → 组装 record → 分发到各通道。
+   * 整体兜底 try/catch：日志库自身故障绝不波及业务代码，失败时向 stderr
+   * 裸写一条降级提示（浏览器退回 console.error）。
+   * @param {string} level - 日志级别
+   * @param {Array} args - 变参数组
+   * @param {object|boolean} [opts={}] true=强制输出；或 { force, env, fileOnly }
+   * @returns {void}
    */
   _emit(level, args, opts = {}) {
-    // 整体兜底：日志库自身故障（参数不可序列化、序列化意外抛错等）绝不波及业务代码
     try {
       this._emitInner(level, args, opts);
     } catch (err) {
@@ -298,7 +358,15 @@ export class AppLogger {
     }
   }
 
-  /** @private _emit 的实际执行体（异常由 _emit 兜底捕获） */
+  /**
+   * _emit 的实际执行体（异常由 _emit 兜底捕获）。
+   * 配置优先级：实例 options > 模块级环境变量规则 > 全局配置；
+   * 门控顺序：环境门控（dev/prod）→ debug/trace 关键词门控 → 级别门槛。
+   * @param {string} level - 日志级别
+   * @param {Array} args - 变参数组
+   * @param {object|boolean} [opts={}] true=强制输出；或 { force, env, fileOnly }
+   * @returns {void}
+   */
   _emitInner(level, args, opts = {}) {
     const { force = false, env = null, fileOnly = false } = typeof opts === 'boolean' ? { force: opts } : (opts ?? {});
 

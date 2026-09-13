@@ -39,7 +39,10 @@ import path from 'node:path';
 import process from 'node:process';
 import { safeStringify } from './safe-stringify.js';
 
-/** 本地日期字符串 YYYY-MM-DD（用于文件滚动，与 record.t 的本地时区基准一致） */
+/**
+ * 生成当天本地日期串 YYYY-MM-DD（用于文件滚动命名，与 record.t 本地时区基准一致）。
+ * @returns {string} 如 '2026-09-13'（sv-SE locale 恰好输出 ISO 格式）
+ */
 function fileDateString() {
   return new Date().toLocaleDateString('sv-SE');
 }
@@ -70,7 +73,13 @@ function isInside(parent, target) {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
-/** 错误文件前缀：显式字符串 > 全局默认前缀（沿用旧约定 error）> 自定义 name（<name>-error） */
+/**
+ * 解析错误文件前缀。
+ * @param {boolean|string} errorOpt - 配置值：true = 按默认规则；字符串 = 自定义前缀
+ * @param {string} name - 主日志文件名前缀
+ * @param {boolean} isGlobalDefaultName - 主前缀是否为全局默认名 'app'（沿用旧约定 error）
+ * @returns {string} 错误文件前缀：'error' 或 '<name>-error' 或自定义串（经 safeSeg 校验）
+ */
 function resolveErrorBase(errorOpt, name, isGlobalDefaultName) {
   if (typeof errorOpt === 'string') return safeSeg(errorOpt, 'error');
   if (isGlobalDefaultName) return 'error';
@@ -90,11 +99,20 @@ function resolveSuffixPart(suffixOpt) {
   return safeSeg(`-${String(suffixOpt)}`);
 }
 
-/** 后缀是否为进程号模式（清理时按数字段通配，连走过期孤儿文件） */
+/**
+ * 后缀是否为进程号模式（清理时按数字段通配，连走过期孤儿文件）。
+ * @param {string|boolean} suffixOpt - 配置值
+ * @returns {boolean} 'pid' 或 true 时为 true
+ */
 function isPidSuffix(suffixOpt) {
   return suffixOpt === 'pid' || suffixOpt === true;
 }
 
+/**
+ * 转义正则元字符（拼接文件名匹配模式用）。
+ * @param {string} s - 原始串
+ * @returns {string} 元字符全部转义后的串
+ */
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -113,6 +131,8 @@ class NodeFileTransport {
    * 相对目录 → 绝对路径（带缓存）。
    * 仅写入路径使用：首次访问时创建目录并缓存；清理路径不走这里
    * （目录不存在时静默跳过，不应产生 mkdir 副作用）。
+   * @param {string} dir - 相对（或绝对）目录
+   * @returns {string} 绝对路径
    */
   _abs(dir) {
     let absDir = this.dirs.get(dir);
@@ -124,6 +144,13 @@ class NodeFileTransport {
     return absDir;
   }
 
+  /**
+   * 同步追加一行到目标文件（目录不存在时自动创建；目标被删时自愈重试一次）。
+   * @param {string} dir - 相对目录
+   * @param {string} filename - 文件名（各段已经 safeSeg 白名单校验）
+   * @param {string} line - 完整日志行（含换行符）
+   * @returns {void} 写入失败向上抛出（由 write() 的外层 try 统一静默）
+   */
   _append(dir, filename, line) {
     const absDir = this._abs(dir);
     const target = path.join(absDir, filename);
@@ -262,6 +289,7 @@ class NodeFileTransport {
    * @param {boolean} [sync=false] 兼容参数（本通道本就同步写入）
    * @param {object|null} [fileOpts=null] 实例级文件配置
    *        { name?, dir?, ext?, date?, dateDir?, subdir?, error?, keepDays?, suffix? }
+   * @returns {void} 写入/双写错误文件/触发每日清理；任何失败静默（控制台通道仍工作）
    */
   write(record, cfg, sync = false, fileOpts = null) {
     if (!cfg.fileEnabled) return;
@@ -316,7 +344,10 @@ class NodeFileTransport {
     }
   }
 
-  /** 兼容保留：同步写入无缓冲，无需刷盘 */
+  /**
+   * 兼容保留：同步写入无缓冲，无需刷盘。
+   * @returns {void}
+   */
   close() {}
 }
 

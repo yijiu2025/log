@@ -52,7 +52,9 @@ function sanitizeForLog(obj, depth = 3) {
 }
 
 /**
- * 判断字段名是否敏感
+ * 判断字段名是否命中敏感模式（任一模式命中即视为敏感）。
+ * @param {string} key - 字段名
+ * @returns {boolean} true = 需要打码为 '***'
  */
 function isSensitive(key) {
   return SENSITIVE_PATTERNS.some(pattern => pattern.test(key));

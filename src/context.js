@@ -11,14 +11,19 @@
 let contextProvider = null;
 
 /**
- * 注册日志上下文提供器
- * @param {() => object|undefined} fn 返回 { requestId, userId, ... } 的函数，会在每次写日志时调用
+ * 注册日志上下文提供器。
+ * @param {() => object|undefined} fn - 返回 { requestId, userId, ... } 的函数，
+ *        每次写日志时调用；传非函数（如 null）可注销
+ * @returns {void}
  */
 export function setLogContextProvider(fn) {
   contextProvider = typeof fn === 'function' ? fn : null;
 }
 
-/** 获取当前日志上下文（任何异常都吞掉，绝不影响业务） */
+/**
+ * 获取当前日志上下文（任何异常都吞掉，绝不影响业务）。
+ * @returns {object} provider 返回的上下文对象；未注册/异常/返回值非法时返回 {}
+ */
 export function getLogContext() {
   if (!contextProvider) return {};
   try {

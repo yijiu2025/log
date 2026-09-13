@@ -48,12 +48,22 @@ export const LEVELS = Object.freeze({
   fatal: 60
 });
 
+/**
+ * 解析宽松布尔值。
+ * @param {*} value - 原始值（'1'/'true'/'yes'/'on' 视为 true，其余 false）
+ * @param {boolean} defaultValue - 值缺失（undefined/null/''）时的默认值
+ * @returns {boolean}
+ */
 function parseBool(value, defaultValue) {
   if (value === undefined || value === null || value === '') return defaultValue;
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 }
 
-/** 三态布尔：未配置返回 null（用于 LOG_DEV 覆盖） */
+/**
+ * 三态布尔解析：未配置返回 null（用于区分"未配置，走默认"与"显式配置"）。
+ * @param {*} value - 原始值
+ * @returns {boolean|null} null = 未配置
+ */
 function parseBoolOpt(value) {
   if (value === undefined || value === null || value === '') return null;
   return parseBool(value, null);
@@ -64,7 +74,8 @@ function parseBoolOpt(value) {
  * - 未配置 / '' / 'off' / 'false' → null（不分子目录）
  * - 'true' / 'auto'              → true（自动用 tag 首段，如 framework.auth.x → framework）
  * - 其他字符串                    → 该字符串作为固定子目录名
- * @returns {string|true|null}
+ * @param {string|boolean|null} value - 配置值（'auto'/'true'/布尔 true = 自动模式）
+ * @returns {string|true|null} true = 用 tag 首段；字符串 = 固定目录名；null = 不分子目录
  */
 function parseSubdirOpt(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -77,6 +88,12 @@ function parseSubdirOpt(value) {
   return s;
 }
 
+/**
+ * 解析 LOG_DEBUG 关键词串（逗号分隔）进集合。
+ * @param {string|undefined} raw - 环境变量原始值
+ * @param {Set<string>} set - 关键词集合（原地追加）
+ * @returns {void}
+ */
 function parseKeywords(raw, set) {
   if (!raw) return;
   for (const part of String(raw).split(',')) {
@@ -85,7 +102,12 @@ function parseKeywords(raw, set) {
   }
 }
 
-/** 兼容旧的 DEBUG_XXX=true 调试开关：DEBUG_AUTH=true → 关键词 auth */
+/**
+ * 兼容旧的 DEBUG_XXX=true 调试开关：DEBUG_AUTH=true → 关键词 auth。
+ * @param {object} env - process.env 对象
+ * @param {Set<string>} set - 关键词集合（原地追加）
+ * @returns {void}
+ */
 function collectLegacyDebugFlags(env, set) {
   for (const [key, value] of Object.entries(env)) {
     if (!/^DEBUG_[A-Z0-9_]+$/.test(key)) continue;
@@ -97,6 +119,9 @@ function collectLegacyDebugFlags(env, set) {
 /**
  * 模块级覆盖规则：LOG_LEVEL_<NAME> / LOG_CONSOLE_<NAME> / LOG_FILE_<NAME>
  * NAME 小写并把下划线转为点分（AUTH_SESSION → auth.session），按 tag 路径段匹配。
+ * @param {object} env - process.env 对象
+ * @param {Map<string, object>} rules - 规则表（原地填充：关键词 → { level?, console?, file? }）
+ * @returns {void}
  */
 function collectModuleRules(env, rules) {
   for (const [key, value] of Object.entries(env)) {
@@ -121,6 +146,11 @@ function collectModuleRules(env, rules) {
 /** configureLog() 编程覆盖（优先级最高） */
 let runtimeOverrides = {};
 
+/**
+ * 从环境变量 + runtimeOverrides 构建完整配置。
+ * @returns {Readonly<object>} 冻结的配置对象（level/maxStr/modules/dir/file/consoleEnabled/
+ *          fileEnabled/pretty/isProd/showDev/debugKeywords），运行期不可变
+ */
 function buildConfig() {
   const env = (typeof process !== 'undefined' && process.env) || {};
   const rawLevel = String(env.LOG_LEVEL || 'info')
@@ -243,11 +273,19 @@ function buildConfig() {
 
 let config = buildConfig();
 
+/**
+ * 读取当前全局配置（冻结对象，运行期不可变）。
+ * @returns {Readonly<object>} buildConfig() 产物
+ */
 export function getLogConfig() {
   return config;
 }
 
-/** 热更新配置（修改环境变量后调用，测试场景有用） */
+/**
+ * 重新从环境变量构建配置（热更新；修改环境变量后调用，测试场景有用）。
+ * 注意：configureLog() 的编程覆盖仍会叠加在环境变量之上。
+ * @returns {Readonly<object>} 新配置
+ */
 export function reloadLogConfig() {
   config = buildConfig();
   return config;
@@ -292,6 +330,9 @@ export function configureLog(patch = {}) {
  * - tag 包含 ".关键词."（段匹配，如 auth → framework.auth.session）
  * - tag 以 ".关键词" 结尾
  * - 关键词以 '*' 结尾：按前缀通配，如 'firewall.*' → firewall.engine
+ * @param {string} tag - 模块标签（点分路径，如 'framework.auth.session'）
+ * @param {string} kw - 单个关键词（'*'/'all' 全放行；'前缀*' 前缀通配）
+ * @returns {boolean} 是否命中
  */
 export function tagMatchesKeyword(tag, kw) {
   if (kw === '*' || kw === 'all') return true;
@@ -299,7 +340,12 @@ export function tagMatchesKeyword(tag, kw) {
   return tag === kw || tag.startsWith(`${kw}.`) || tag.includes(`.${kw}.`) || tag.endsWith(`.${kw}`);
 }
 
-/** 判断某个 tag 的 debug/trace 是否被关键词白名单放行 */
+/**
+ * 判断某个 tag 的 debug/trace 是否被关键词白名单放行。
+ * @param {string} tag - 模块标签
+ * @param {Set<string>} keywords - 关键词集合（含 '*'/'all' 时全部放行）
+ * @returns {boolean} 任一关键词命中即为 true；集合为空恒为 false
+ */
 export function isDebugTagEnabled(tag, keywords) {
   if (!keywords || keywords.size === 0) return false;
   if (keywords.has('*') || keywords.has('all')) return true;
@@ -313,7 +359,9 @@ export function isDebugTagEnabled(tag, keywords) {
 /**
  * 匹配模块级覆盖规则（LOG_LEVEL_<NAME> 等）。
  * 多个规则命中时取关键词最长（最具体）的那个。
- * @returns {object|null} { level?, console?, file? }
+ * @param {string} tag - 模块标签
+ * @param {Map<string, object>} modules - collectModuleRules 产物（关键词 → 规则）
+ * @returns {object|null} 命中的规则 { level?, console?, file? }；无命中返回 null
  */
 export function matchModuleRule(tag, modules) {
   if (!modules || modules.size === 0) return null;

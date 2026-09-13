@@ -71,14 +71,15 @@ import { sanitizeForLog, sanitizeUrl, sanitizeUserAgent } from './sanitize.js';
 
 /**
  * 创建带模块 tag 的 logger（推荐入口）
- * @param {string} [tag] 模块标签，如 'auth.session'
- * @param {object} [options] 实例级配置 { level?, console?, file?, debug? }
+ * @param {string} [tag='app'] 模块标签，如 'auth.session'
+ * @param {object|null} [options=null] 实例级配置 { level?, console?, file?, debug? }
+ * @returns {AppLogger} logger 实例（级别方法 + always/dev/prod/file 变体 + config/child/time）
  */
 export function createLogger(tag, options = null) {
   return new AppLogger(tag || 'app', options);
 }
 
-/** 全局默认 logger（脚本/兜底场景用） */
+/** 全局默认 logger（脚本/兜底场景用，tag='app'） */
 export const logger = createLogger('app');
 
 /**
@@ -108,8 +109,9 @@ export { AppLogger };
 class Logger {
   /**
    * 记录认证/授权事件（保留原签名）
-   * @param {Object} ctx 兼容的请求上下文对象
-   * @param {Object} options 日志选项
+   * @param {Object} ctx - 兼容的请求上下文对象（读取 state.clientInfo / request.id）
+   * @param {object} [options] - 日志选项 { event, uid, appId, details }
+   * @returns {Promise<void>}
    */
   static async auth(ctx, { event, uid, appId, details = {} } = {}) {
     const { ip, region, city } = ctx?.state?.clientInfo || {};
@@ -127,30 +129,37 @@ class Logger {
     });
   }
 
+  /** 信息日志（委托给默认 logger） */
   static info(message, ...rest) {
     logger.info(message, ...rest);
   }
 
+  /** 警告日志（委托给默认 logger） */
   static warn(message, ...rest) {
     logger.warn(message, ...rest);
   }
 
+  /** 错误日志（委托给默认 logger） */
   static error(message, ...rest) {
     logger.error(message, ...rest);
   }
 
+  /** 调试日志：需 LOG_DEBUG 关键词命中 'app'（委托给默认 logger） */
   static debug(...rest) {
     logger.debug(...rest);
   }
 
+  /** 必输日志：绕过全部门控（委托给默认 logger） */
   static always(...rest) {
     logger.always(...rest);
   }
 
+  /** 仅开发环境输出（委托给默认 logger） */
   static dev(...rest) {
     logger.dev(...rest);
   }
 
+  /** 仅生产环境输出（委托给默认 logger） */
   static prod(...rest) {
     logger.prod(...rest);
   }
