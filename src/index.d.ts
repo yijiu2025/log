@@ -23,6 +23,7 @@ export interface LoggerOptions {
    *   - subdir：模块子目录。'auto'/true = 按 tag 首段自动分类；字符串 = 固定目录名
    *   - keepDays：本模块滚动日志保留天数（0 = 不清理）
    *   - error：错误文件开关（默认 true）或自定义前缀字符串
+   *   - suffix：文件名后缀；'pid' = 进程号（多进程部署防行交错），其他字符串原样
    */
   file?: boolean | {
     name?: string;
@@ -33,6 +34,7 @@ export interface LoggerOptions {
     subdir?: string | boolean;
     keepDays?: number;
     error?: boolean | string;
+    suffix?: string | boolean;
   };
   /** true = 本模块 debug/trace 免关键词直通；false = 强制静默 */
   debug?: boolean;
@@ -81,6 +83,10 @@ export interface LogGlobalOptions {
   subdir?: string | boolean;
   fileError?: boolean | string;
   keepDays?: number;
+  /** 文件名后缀：'pid' = 进程号（多进程部署防行交错）；其他字符串原样；'' = 无 */
+  fileSuffix?: string | boolean;
+  /** 单字段字符串长度上限（字符数，默认 2000；0 = 关闭截断），超长截断加 '…(len=N)' 标记 */
+  maxStr?: number;
   console?: boolean;
   file?: boolean | {
     name?: string;
@@ -91,6 +97,7 @@ export interface LogGlobalOptions {
     subdir?: string | boolean;
     keepDays?: number;
     error?: boolean | string;
+    suffix?: string | boolean;
   };
   pretty?: boolean;
   showDev?: boolean;
@@ -140,6 +147,7 @@ declare const LoggerDefault: {
   always(...rest: unknown[]): void;
   dev(...rest: unknown[]): void;
   prod(...rest: unknown[]): void;
+  file(...rest: unknown[]): void;
 };
 export default LoggerDefault;
 export { LoggerDefault as Logger };

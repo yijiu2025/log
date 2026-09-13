@@ -20,6 +20,10 @@
  *                     也可填固定目录名（如 LOG_SUBDIR=firewall）
  * - LOG_ERROR_FILE    错误文件开关，默认 on；off = 不单独写错误文件；也可填自定义前缀
  * - LOG_KEEP_DAYS     滚动日志保留天数，默认 30；0 = 关闭过期清理
+ * - LOG_FILE_SUFFIX   文件名后缀（主日志与错误文件都带），默认无；
+ *                     'pid' = 用进程号（多进程部署防行交错），如 app-12345-2026-09-13.log
+ * - LOG_MAX_STR       单字段字符串长度上限（字符数），默认 2000；0 = 关闭截断。
+ *                     超长截断并追加 '…(len=原长)' 标记，防单条日志撑爆文件
  * - LOG_CONSOLE       是否输出到控制台，默认 true
  * - LOG_FILE          是否写入文件（仅 Node 生效），默认 true
  * - LOG_PRETTY        控制台是否彩色人类可读输出；默认：非 production 为 true
@@ -149,6 +153,8 @@ function buildConfig() {
     subdir: parseSubdirOpt(env.LOG_SUBDIR),
     // 错误文件：默认另写；LOG_ERROR_FILE=off 或实例 file.error=false 关闭；字符串 = 自定义前缀
     error: parseBoolOpt(env.LOG_ERROR_FILE) ?? true,
+    // 文件名后缀：'' 无；'pid' = 进程号；其他字符串 = 原样（多进程部署防行交错用）
+    suffix: env.LOG_FILE_SUFFIX || '',
     // 保留天数：滚动日志过期自动清理（只删匹配命名模式的文件）；LOG_KEEP_DAYS=0 关闭
     keepDays: (() => {
       const raw = parseInt(env.LOG_KEEP_DAYS, 10);
@@ -156,10 +162,15 @@ function buildConfig() {
     })()
   };
 
+  // 单字段字符串长度上限（record 内递归生效；0 = 关闭截断）
+  const rawMaxStr = parseInt(env.LOG_MAX_STR, 10);
+  const maxStr = Number.isFinite(rawMaxStr) && rawMaxStr >= 0 ? rawMaxStr : 2000;
+
   const cfg = {
     level: Object.hasOwn(LEVELS, rawLevel) ? rawLevel : 'info',
     debugKeywords: keywords,
     modules,
+    maxStr,
     dir: env.LOG_DIR || 'logs',
     fileName: env.LOG_FILE_NAME || 'app',
     file: fileCfg,
@@ -187,6 +198,11 @@ function buildConfig() {
   if (o.subdir !== undefined) cfg.file.subdir = parseSubdirOpt(o.subdir);
   if (typeof o.fileError === 'boolean' || typeof o.fileError === 'string') {
     cfg.file.error = o.fileError;
+  }
+  if (o.fileSuffix !== undefined) cfg.file.suffix = String(o.fileSuffix);
+  if (o.maxStr !== undefined) {
+    const ms = parseInt(o.maxStr, 10);
+    if (Number.isFinite(ms) && ms >= 0) cfg.maxStr = ms;
   }
   if (typeof o.console === 'boolean') cfg.consoleEnabled = o.console;
   if (typeof o.file === 'boolean') cfg.fileEnabled = o.file;
@@ -219,6 +235,9 @@ function buildConfig() {
     cfg.debugKeywords = set;
   }
 
+  // 深冻结：配置对象在运行期不可变（file 与各模块规则一并冻结）
+  for (const rule of cfg.modules.values()) Object.freeze(rule);
+  Object.freeze(cfg.file);
   return Object.freeze(cfg);
 }
 
@@ -247,7 +266,9 @@ export function reloadLogConfig() {
  *   - subdir: 'auto'|'名'|false  模块子目录：'auto'/true = 按 tag 首段自动分类；字符串 = 固定目录名（仅 Node）
  *   - fileError: true|false|'自定义前缀'  错误文件开关/命名（仅 Node）
  *   - keepDays: 30             滚动日志保留天数，0 关闭清理（仅 Node）
- *   - file: true|false|{name?,dir?,ext?,date?,dateDir?,subdir?,error?,keepDays?}  文件总开关或文件配置对象（合并）
+ *   - fileSuffix: 'pid'|'名'   文件名后缀：'pid' = 进程号；字符串原样；'' 无（仅 Node）
+ *   - maxStr: 2000             单字段字符串长度上限（字符数），0 关闭截断
+ *   - file: true|false|{name?,dir?,ext?,date?,dateDir?,subdir?,error?,keepDays?,suffix?}  文件总开关或文件配置对象（合并）
  *   - console: true|false      控制台总开关
  *   - pretty: true|false       控制台彩色可读 / JSON 行
  *   - showDev: true|false      dev 专属输出显示开关

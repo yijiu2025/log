@@ -30,11 +30,47 @@
  */
 import { LEVELS, getLogConfig, isDebugTagEnabled, matchModuleRule } from './config.js';
 import { getLogContext } from './context.js';
+import { CORE_RECORD_KEYS, RESERVED_KEYS } from './record-schema.js';
 import { safeStringify } from './safe-stringify.js';
 import { sanitizeForLog } from './sanitize.js';
 import { consoleTransport, fileTransport } from './transports.js';
 
-const RESERVED_KEYS = new Set(['t', 'level', 'tag', 'msg', 'err', 'requestId', 'userId']);
+/** 单条字段字符串长度上限之外的超长标记后缀模板 */
+const TRUNCATE_MARK = '…(len=%d)';
+
+/** 本地时间 ISO 8601 字符串（含时区偏移，如 2026-09-13T23:30:00.123+08:00）。
+ * 与文件滚动日期（本地时区）保持同一基准，避免跨午夜时文件名与内容时间对不上 */
+function localIsoTime() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}` +
+    `${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`
+  );
+}
+
+/**
+ * 递归截断 record 中的超长字符串（外部输入兜底防护，防单条日志撑爆文件）。
+ * 原地修改并返回 record；maxStr <= 0 表示关闭截断。
+ * @param {object} obj 日志记录对象（调用前刚组装完，无外部引用）
+ * @param {number} max 单字段字符串长度上限
+ * @param {number} [depth] 递归深度限制
+ */
+function truncateStrings(obj, max, depth = 4) {
+  if (max <= 0 || depth <= 0 || !obj || typeof obj !== 'object') return obj;
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (typeof v === 'string') {
+      if (v.length > max) obj[k] = v.slice(0, max) + TRUNCATE_MARK.replace('%d', String(v.length));
+    } else if (v && typeof v === 'object') {
+      truncateStrings(v, max, depth - 1);
+    }
+  }
+  return obj;
+}
 
 /** 是否为可展开合并的普通对象 */
 function isPlainObject(value) {
@@ -97,7 +133,7 @@ function parseArgs(args) {
 /** 组装最终 record：固定字段在前，业务 data 冲突时整体让位到 data 键下 */
 function buildRecord(tag, level, msg, data, err) {
   const ctx = getLogContext();
-  const record = { t: new Date().toISOString(), level, tag, msg };
+  const record = { t: localIsoTime(), level, tag, msg };
 
   let payload = data;
   for (const key of Object.keys(data)) {
@@ -107,10 +143,12 @@ function buildRecord(tag, level, msg, data, err) {
     }
   }
   Object.assign(record, payload);
-  Object.assign(record, ctx);
 
-  if (ctx.requestId !== undefined) record.requestId = ctx.requestId;
-  if (ctx.userId !== undefined && record.userId === undefined) record.userId = ctx.userId;
+  // ctx 注入（requestId/userId 等）：核心字段受保护，绝不被外部 provider 覆盖
+  for (const [k, v] of Object.entries(ctx)) {
+    if (!CORE_RECORD_KEYS.has(k)) record[k] = v;
+  }
+
   if (err) {
     record.err = {
       name: err.name,
@@ -118,7 +156,8 @@ function buildRecord(tag, level, msg, data, err) {
       ...(err.stack ? { stack: err.stack } : {})
     };
   }
-  return record;
+  // 超长字符串兜底截断（外部输入防护；maxStr<=0 关闭）
+  return truncateStrings(record, getLogConfig().maxStr ?? 2000);
 }
 
 export class AppLogger {
@@ -238,7 +277,7 @@ export class AppLogger {
   /**
    * @param {string} level
    * @param {Array} args
-   * @param {object|boolean} [opts] true=强制输出；或 { force, env, fileOnly, sync }
+   * @param {object|boolean} [opts] true=强制输出；或 { force, env, fileOnly }
    */
   _emit(level, args, opts = {}) {
     // 整体兜底：日志库自身故障（参数不可序列化、序列化意外抛错等）绝不波及业务代码
@@ -261,12 +300,7 @@ export class AppLogger {
 
   /** @private _emit 的实际执行体（异常由 _emit 兜底捕获） */
   _emitInner(level, args, opts = {}) {
-    const {
-      force = false,
-      env = null,
-      fileOnly = false,
-      sync = false
-    } = typeof opts === 'boolean' ? { force: opts } : (opts ?? {});
+    const { force = false, env = null, fileOnly = false } = typeof opts === 'boolean' ? { force: opts } : (opts ?? {});
 
     const cfg = getLogConfig();
     const inst = this.options;
@@ -310,11 +344,11 @@ export class AppLogger {
     const record = buildRecord(this.tag, level, msg, data, err);
 
     if (fileOnly) {
-      // file 变体：只留档、不刷控制台（受文件开关约束）
-      if (fileOn) fileTransport.write(record, cfg, sync || level === 'fatal', fileOpts);
+      // file 变体：只留档、不刷控制台（受文件开关约束）；fatal 同步落盘防崩溃丢失
+      if (fileOn) fileTransport.write(record, cfg, level === 'fatal', fileOpts);
       return;
     }
     if (consoleOn) consoleTransport.write(record, cfg);
-    if (fileOn) fileTransport.write(record, cfg, sync || level === 'fatal', fileOpts);
+    if (fileOn) fileTransport.write(record, cfg, level === 'fatal', fileOpts);
   }
 }

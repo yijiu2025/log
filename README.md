@@ -179,6 +179,8 @@ configureLog({ file: { dateDir: true } });
 | `LOG_SUBDIR` | 空 | 模块子目录：`auto`/`true` = 按 tag 首段；或固定目录名 |
 | `LOG_ERROR_FILE` | `true` | 错误文件开关 |
 | `LOG_KEEP_DAYS` | `30` | 日志保留天数（`0` = 永久保留） |
+| `LOG_FILE_SUFFIX` | 空 | 文件名后缀：`pid` = 进程号（多进程部署防行交错）；或自定义字符串 |
+| `LOG_MAX_STR` | `2000` | 单字段字符串长度上限（字符数），超长截断加 `…(len=N)` 标记；`0` = 关闭 |
 | `LOG_CONSOLE` | `true` | 控制台开关 |
 | `LOG_FILE` | `true` | 文件开关 |
 | `LOG_PRETTY` | 非 prod 为 `true` | 控制台彩色可读 / JSON 行 |
@@ -204,9 +206,12 @@ log.file.info('仅 Node 生效');         // 浏览器中安全 no-op
 
 ## 内置能力
 
-- **自动脱敏**：`password` / `token` / `secret` / `key` / `cookie` 等字段递归（3 层）输出为 `***`；超过 3 层的嵌套部分整体替换为 `[maxDepth]` 占位符，绝不透传未脱敏的原始对象
+- **自动脱敏**：`password` / `token` / `secret` / `key` / `cookie` 等字段递归（3 层）输出为 `***`；超过 3 层的嵌套部分整体替换为 `[maxDepth]` 占位符，绝不透传未脱敏的原始对象（仅作用于对象/数组参数，`msg` 字符串不做脱敏——外部输入请先截断再入日志）
 - **永不抛异常**：日志调用自身绝不把错误抛进业务代码——循环引用、BigInt、Symbol 等经 `safeStringify` 安全序列化（`[Circular]` / `123n` / `Symbol(x)`），序列化意外失败时兜底写 stderr 降级提示
-- **上下文注入**：`setLogContextProvider()` 可注入 `requestId` / `userId`，请求内日志自动携带
+- **超长截断**：单字段字符串默认 2000 字符上限（`LOG_MAX_STR` 可调，0 关闭），防单条日志撑爆文件
+- **时区一致**：`record.t` 为本地时区 ISO 8601（含偏移量），与文件滚动日期同基准，跨午夜不出现文件名与内容时间错位
+- **多进程友好**：`LOG_FILE_SUFFIX=pid` 按进程分文件防行交错，过期清理按数字段通配连走孤儿文件
+- **上下文注入**：`setLogContextProvider()` 可注入 `requestId` / `userId`，请求内日志自动携带（核心字段 t/level/tag/msg/err 受保护，不会被 provider 覆盖）
 - **Error 提取**：传入 `Error` 自动提取 `message` + `stack`
 - **计时器**：`const done = log.time('dbQuery'); ...; done();` 自动输出耗时
 - **原始输出**：`import { logStdout as stdout } from 'wb-logkit'` 无时间戳装饰，适合 CLI 结果展示

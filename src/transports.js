@@ -10,6 +10,7 @@
  * @since 2026-09-11
  */
 
+import { RESERVED_KEYS } from './record-schema.js';
 import { safeStringify } from './safe-stringify.js';
 
 const isNode = typeof process !== 'undefined' && !!process.versions?.node;
@@ -25,7 +26,9 @@ function prettyTime(iso) {
 }
 
 function useColor() {
-  return isNode && process.stdout?.isTTY !== false;
+  // 仅真实 TTY 上色；管道/重定向（isTTY 为 undefined）不输出 ANSI，
+  // 避免污染 docker/pm2/日志收集端的纯文本与 JSON 日志
+  return isNode && process.stdout?.isTTY === true;
 }
 
 function paint(text, code, enabled) {
@@ -39,10 +42,9 @@ function paint(text, code, enabled) {
 
 /** 组装 data/err 的紧凑展示串（pretty 模式用） */
 function buildExtraPayload(record) {
-  const reserved = new Set(['t', 'level', 'tag', 'msg', 'err', 'requestId', 'userId']);
   const payload = {};
   for (const [k, v] of Object.entries(record)) {
-    if (!reserved.has(k)) payload[k] = v;
+    if (!RESERVED_KEYS.has(k)) payload[k] = v;
   }
   let str = Object.keys(payload).length ? safeStringify(payload) : '';
   if (record.err && !record.err.stack) {

@@ -16,7 +16,8 @@ const SENSITIVE_PATTERNS = [
   /authorization/i,
   /cookie/i,
   /credential/i,
-  /key/i
+  // key(s) 后不能紧跟小写字母：命中 key/apiKey/primaryKey/keyId，放过 keyword/keyboard 等误伤
+  /keys?(?![a-z])/i
 ];
 
 /** 脱敏占位符 */
