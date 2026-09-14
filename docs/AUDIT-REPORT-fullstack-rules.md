@@ -316,7 +316,19 @@ jest（全量）                                                                
 E2E（fatal 兜底 / fileOnly 告警 / 非法配置留痕 / 写入失败留痕 / 限流 / 正常落盘无回归） → 全部 OK
 浏览器路径（无 process 时 writeRawStderr 退回 console.error）                 → OK
 静态检查：index.js / degraded.js / logger.js / config.js 无 node: 内置模块 import → 前端可安全打包
+npm pack --dry-run                                                          → 15 files / 43.7 kB，docs/ 正确排除
 ```
+
+### 交付状态
+
+| 环节 | 状态 |
+| ---- | ---- |
+| 代码修复 | ✅ 12/12 完成 |
+| ESLint / 测试 | ✅ 0 警告、54 + 673 全绿 |
+| 版本号 | ✅ 0.4.1 → **0.5.0** |
+| 提交 | ✅ `2aad119`（feat: 防静默失败——降级告警出口 + fatal 兜底 + 非法配置留痕） |
+| GitHub 推送 | ✅ `git ls-remote origin main` 确认为 `2aad119` |
+| npm 发布 | ⏸️ **待用户提供新 token**（`~/.npmrc` 内旧 token 已 401） |
 
 ### 设计取舍说明
 
