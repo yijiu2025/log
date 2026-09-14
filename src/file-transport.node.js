@@ -317,7 +317,11 @@ class NodeFileTransport {
    * @returns {void} 写入/双写错误文件/触发每日清理；任何失败静默（控制台通道仍工作）
    */
   write(record, cfg, sync = false, fileOpts = null) {
-    if (!cfg.fileEnabled) return;
+    // 全局文件通道关闭时，仍允许**实例级显式 file 配置**生效（实例优先级最高）：
+    //   const log = createLogger('pay'); log.config({ file: { name: 'pay' } });
+    // 只有全局关闭且无实例 file 配置时，才整体跳过。
+    const instWantsFile = fileOpts !== null && fileOpts !== undefined;
+    if (!cfg.fileEnabled && !instWantsFile) return;
     const gf = cfg.file ?? {};
     // dir 是完整路径（允许绝对路径/多级子目录），不做段级白名单；写/删目标仍有 isInside 兜底
     const baseDir = fileOpts?.dir ?? gf.dir ?? 'logs';

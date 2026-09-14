@@ -1,6 +1,6 @@
 # wb-logkit
 
-> 零依赖、Node / 浏览器通用的统一日志库。分级输出 · 必输/环境/文件矩阵控制 · 关键词调试 · 模块级配置 · 自动脱敏 · 按天滚动文件。
+> 零依赖、Node / 浏览器通用的统一日志库。分级输出 · 必输/环境/文件矩阵控制 · 关键词调试 · 模块级配置 · 自动脱敏 · 按天/按模块分目录滚动文件。
 
 [![npm version](https://img.shields.io/npm/v/wb-logkit.svg)](https://www.npmjs.com/package/wb-logkit)
 [![license](https://img.shields.io/npm/l/wb-logkit.svg)](./LICENSE)
@@ -16,6 +16,13 @@ npm install wb-logkit
 - 原生 **ESM**，Node >= 18
 - 附带完整 **TypeScript** 类型定义
 
+## 设计原则（重要）
+
+1. **默认只输出控制台，不写文件** —— 不配置就绝不会产生任何日志文件
+2. **写文件必须显式开启** —— 在 `configureLog` 或模块的 `config` 里给 `file`
+3. **`createLogger` 只有两个参数** —— `tag` + 是否注册为全局；其余配置一律走 `config()`
+4. **控制台与文件级别独立** —— 控制台可以安静，文件照样记全量
+
 ## 快速开始
 
 ```js
@@ -30,14 +37,43 @@ log.error('查询失败', err);            // 错误
 log.debug('缓存未命中', key);          // 调试：默认静默，需关键词放开
 ```
 
-不想建 logger？直接打印：
+### 注册为全局 log
+
+在入口文件（`index.js` / `app.js`）头部执行一次，其他文件即可直接使用：
 
 ```js
-import { log } from 'wb-logkit';
+// app.js —— 只需一次
+import { createLogger } from 'wb-logkit';
+createLogger('app', true);          // 第二个参数 true = 注册为全局
 
-log.info('直接打印');                  // 等价于 createLogger('app')
-log.config({ level: 'debug' });        // 同样支持运行时配置
+// 任意其他文件 —— 无需再 createLogger
+import { log } from 'wb-logkit';
+log.info('直接可用');
 ```
+
+未注册时 `log` 是一个 tag 为 `app` 的默认实例。全局 log 是单例，**后注册的覆盖先注册的**；
+`log` 是稳定引用（Proxy 门面），所以其他文件即使提前 import 也能拿到最新注册的那个。
+
+### 配置一律走 config()
+
+```js
+const log = createLogger('pay');
+
+log.config({
+  level: 'info',                       // 本模块总级别
+  console: true,                       // 控制台开关
+  consoleLevel: 'warn',                // 控制台通道级别：只打 warn+
+  file: {                              // ← 给 file 即开启本模块文件通道
+    name: 'pay',                       //   文件名（默认 = tag）
+    level: 'all'                       //   文件记全量（含 debug/trace）
+  }
+});
+
+// 也可随时改回来
+log.config({ file: false });           // 本模块不再写文件
+```
+
+`config()` 是**累积合并**的，返回实例本身可链式调用。
 
 ## 核心概念
 
@@ -84,7 +120,8 @@ LOG_DEBUG=*               # 放开全部
 
 ```js
 // ① 实例级（优先级最高）
-const log = createLogger('pay.charge', {
+const log = createLogger('pay.charge');
+log.config({
   level: 'debug',             // 本模块最低级别
   console: true,              // 本模块控制台开关
   file: { name: 'pay' },      // 独立文件：logs/pay-YYYY-MM-DD.log
@@ -113,20 +150,59 @@ configureLog({
 
 ## 日志文件（仅 Node）
 
+文件输出**默认关闭**，三种开启方式（按需选一或叠加）：
+
 ```js
-createLogger('pay', {
+// ① 全局开启（推荐，写在 app.js 的 configureLog 里）——所有 logger 一起写文件
+configureLog({
   file: {
-    name: 'pay',      // 文件名前缀（默认跟随全局 app）
+    name: 'app',      // 文件名前缀，默认 app；不配也算「有 file 配置」，同样开启
     dir: 'logs',      // 目录，不存在自动创建
     ext: '.log',      // 扩展名，如 .txt
+    suffix: '',       // 文件名后缀：'pid' = 进程号（多进程防行交错）；或自定义字符串
     date: true,       // 文件名带日期后缀；false = 单文件
     dateDir: false,   // 日期作为子目录：logs/2026-09-12/app.log
     subdir: false,    // 模块子目录：'auto' = 按 tag 首段分类；字符串 = 固定目录名
+    level: 'info',    // 文件记录等级：'info' = info 及以上；'all'；['info','error']；'warn,error'
     error: true,      // 错误文件：true 默认名 / false 关闭 / 字符串自定义前缀
     keepDays: 30      // 保留天数，按天自动清理；0 = 永久保留
   }
 });
+
+// ② 某个模块单独开启/改为自己的文件（实例配置「替换」全局，不会被记两遍）
+createLogger('pay', true).config({
+  file: { name: 'pay', subdir: 'auto', level: 'all' }
+});
+
+// ③ 只要进程级错误单独留档，不影响其余模块
+createLogger('process').config({ file: { name: 'process', level: 'all', error: true } });
 ```
+
+> **不手动配置也有默认值**：只要出现 `file: {…}` 对象（哪怕 `{}`）就等于开启，其余键全部走默认值。
+> 显式关闭用 `file: false`（优先级最高）。
+
+### 文件记录等级 `file.level`
+
+控制哪些级别进文件，与全局 `level`、控制台门槛互相独立：
+
+| 写法 | 含义 |
+| --- | --- |
+| 不填 | 跟随全局门槛（`level` + debug 解锁） |
+| `'info'` | info 及以上 |
+| `'all'` / `'*'` | 全量，含 debug/trace |
+| `['info','error']` | 白名单：只记这两个级别 |
+| `'warn,error'` | 逗号串，等价于数组 |
+| `'off'` / `null` | 关闭该 channel |
+
+控制台对应 `consoleLevel`，写法完全一致（全局写在 `configureLog({ consoleLevel })`，单实例写 `createLogger(tag).config({ consoleLevel })`）。
+
+### 避免重复记录
+
+实例 `file` 配置是**替换**而非叠加：一个 logger 一次输出最多写一个文件。
+
+- 全局开了 `file`，模块没有 `file` → 用全局配置
+- 模块给了 `file` → 完全用模块的，全局配置对它不再生效（文件、目录、等级全部以模块为准）
+- 模块 `file: false` → 该模块不写文件，即使全局开着
 
 ### 目录布局（三种，可组合）
 
@@ -147,9 +223,9 @@ createLogger('pay', {
 
 ```js
 // 每个模块独立文件 + 按 tag 自动分目录 + 日期二级目录
-createLogger('firewall.engine', { file: { subdir: 'auto' } });
-createLogger('oauth21.token',   { file: { name: 'oauth', subdir: 'auto' } });
-configureLog({ file: { dateDir: true } });
+createLogger('firewall.engine', true).config({ file: { subdir: 'auto' } });
+createLogger('oauth21.token',   true).config({ file: { name: 'oauth', subdir: 'auto' } });
+configureLog({ file: { dateDir: true } });   // 全局：日期做一级目录
 ```
 
 产出文件：
@@ -182,12 +258,14 @@ configureLog({ file: { dateDir: true } });
 | `LOG_FILE_SUFFIX` | 空 | 文件名后缀：`pid` = 进程号（多进程部署防行交错）；或自定义字符串 |
 | `LOG_MAX_STR` | `2000` | 单字段字符串长度上限（字符数），超长截断加 `…(len=N)` 标记；`0` = 关闭 |
 | `LOG_CONSOLE` | `true` | 控制台开关 |
-| `LOG_FILE` | `true` | 文件开关 |
+| `LOG_CONSOLE_LEVEL` | 空 | 控制台记录等级：`info` / `all` / `error,warn` / `debug` |
+| `LOG_FILE` | `false` | 文件开关（**默认关闭**，需显式开启） |
+| `LOG_FILE_LEVEL` | 空 | 文件记录等级：`info` / `all` / `error,warn` / `debug` |
 | `LOG_PRETTY` | 非 prod 为 `true` | 控制台彩色可读 / JSON 行 |
 | `LOG_DEV` | 随 `NODE_ENV` | dev 专属输出强制开关 |
 | `LOG_LEVEL_<NAME>` | — | 模块级最低级别覆盖 |
 | `LOG_CONSOLE_<NAME>` | — | 模块级控制台开关 |
-| `LOG_FILE_<NAME>` | — | 模块级文件开关 |
+| `LOG_FILE_<NAME>` | — | 模块级文件开关（`true` 会同时开启该模块的文件输出） |
 
 ## 浏览器使用
 
@@ -220,10 +298,13 @@ log.file.info('仅 Node 生效');         // 浏览器中安全 no-op
 
 | 导出 | 说明 |
 | --- | --- |
-| `createLogger(tag, options?)` | 创建模块 logger（推荐入口） |
-| `log` / `logger` | 全局默认 logger（tag = `app`） |
-| `configureLog(options)` | 全局编程配置 |
-| `getLogConfig()` / `reloadLogConfig()` | 读取配置 / 重载环境变量 |
+| `createLogger(tag, asGlobal?)` | 创建模块 logger；`asGlobal = true` 同时注册为全局（推荐入口） |
+| `log` / `logger` | 全局 logger 门面（未注册时为 tag = `app` 的默认实例） |
+| `registerGlobalLogger(instance)` / `getGlobalLogger()` | 手动注册 / 读取当前全局实例 |
+| `configureLog(options)` | 全局编程配置（一般只在入口调用一次） |
+| `getLogConfig()` / `reloadLogConfig(opts?)` | 读取配置 / 重载环境变量 |
+| `resetLogConfig()` | 清空运行时覆盖并重载（测试隔离用） |
+| `parseLevelOpt(v)` / `levelPasses(list, level)` / `LEVEL_ORDER` | 等级白名单解析与判定工具 |
 | `AppLogger` | logger 类（可 `new` 或继承） |
 | `logStdout` / `stdout` | 无装饰原始输出 |
 | `setLogContextProvider(fn)` | 注入请求上下文 |

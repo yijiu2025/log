@@ -25,7 +25,12 @@
  * - LOG_MAX_STR       单字段字符串长度上限（字符数），默认 2000；0 = 关闭截断。
  *                     超长截断并追加 '…(len=原长)' 标记，防单条日志撑爆文件
  * - LOG_CONSOLE       是否输出到控制台，默认 true
- * - LOG_FILE          是否写入文件（仅 Node 生效），默认 true
+ * - LOG_CONSOLE_LEVEL 控制台通道级别门槛，默认跟随 LOG_LEVEL
+ *                     （仅控制台提高门槛，文件仍记全量：LOG_CONSOLE_LEVEL=warn）
+ * - LOG_FILE          是否写入文件（仅 Node 生效），**默认 false**（默认只输出控制台）
+ *                     开启方式：LOG_FILE=true，或 configureLog({ file: true | {...} })
+ * - LOG_FILE_LEVEL    文件通道级别门槛，默认跟随 LOG_LEVEL
+ *                     （控制台只打 warn+、文件记全量：LOG_CONSOLE_LEVEL=warn 且不设此项）
  * - LOG_PRETTY        控制台是否彩色人类可读输出；默认：非 production 为 true
  * - LOG_DEV           dev 专属输出（log.dev）显示开关；默认非 production 显示
  *
@@ -54,6 +59,71 @@ export const LEVELS = Object.freeze({
  * @param {boolean} defaultValue - 值缺失（undefined/null/''）时的默认值
  * @returns {boolean}
  */
+/** 级别按严重程度升序排列（与 LEVELS 数值一致；白名单展开用） */
+export const LEVEL_ORDER = Object.freeze(Object.keys(LEVELS).sort((a, b) => LEVELS[a] - LEVELS[b]));
+
+/**
+ * 解析通道级「级别门槛 / 级别过滤」（LOG_CONSOLE_LEVEL / LOG_FILE_LEVEL /
+ * 实例 consoleLevel / file.level）。
+ *
+ * 支持三种写法：
+ *   - `null` / '' / 'off' / 'none'      → null（不设门槛，跟随全局 level）
+ *   - 单个级别名 'info'                  → 门槛语义：该级别及以上都记
+ *   - 'all'                             → 全量：trace 起全记（等价门槛 trace）
+ *   - 数组 ['info','error'] / 'info,error' → **白名单语义**：只记列出的级别
+ *
+ * @returns {string[]|null} 统一归一为"允许的级别名数组"：
+ *   - 单个级别 / 'all' → 展开成白名单数组
+ *   - 数组             → 去重后的合法级别数组（保持传入顺序）
+ *   - 未配置           → null（跟随全局）
+ */
+export function parseLevelOpt(value) {
+  if (value === undefined || value === null || value === '') return null;
+
+  // 数组写法：白名单
+  if (Array.isArray(value)) {
+    const list = value
+      .map(v =>
+        String(v ?? '')
+          .trim()
+          .toLowerCase()
+      )
+      .filter(v => Object.hasOwn(LEVELS, v));
+    return list.length ? [...new Set(list)] : null;
+  }
+
+  // 字符串写法：可能是 'all' / 单级别 / 'info,error' 逗号分隔
+  const s = String(value).trim().toLowerCase();
+  if (!s || s === 'off' || s === 'none' || s === 'null' || s === 'false') return null;
+  if (s === 'all' || s === '*') return [...LEVEL_ORDER]; // 全量
+
+  if (s.includes(',')) {
+    const list = s
+      .split(',')
+      .map(v => v.trim())
+      .filter(v => Object.hasOwn(LEVELS, v));
+    return list.length ? [...new Set(list)] : null;
+  }
+
+  // 单个级别 → 门槛语义，展开为"该级别及以上"的白名单
+  if (Object.hasOwn(LEVELS, s)) {
+    const min = LEVELS[s];
+    return LEVEL_ORDER.filter(lv => LEVELS[lv] >= min);
+  }
+  return null;
+}
+
+/**
+ * 判断某级别是否被通道级别配置放行。
+ * @param {string[]|null} allowList - parseLevelOpt 的产物（null = 不限制）
+ * @param {string} level - 待判级别
+ * @returns {boolean}
+ */
+export function levelPasses(allowList, level) {
+  if (!allowList || allowList.length === 0) return true;
+  return allowList.includes(level);
+}
+
 function parseBool(value, defaultValue) {
   if (value === undefined || value === null || value === '') return defaultValue;
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
@@ -173,6 +243,9 @@ function buildConfig() {
     name: env.LOG_FILE_NAME || 'app',
     dir: env.LOG_DIR || 'logs',
     ext: env.LOG_FILE_EXT || '.log',
+    // 文件通道独立级别门槛（LOG_FILE_LEVEL）；null = 跟随全局 level
+    // 用途：控制台只打 warn+，文件仍记全量 → consoleLevel/fileLevel 分开设
+    level: parseLevelOpt(env.LOG_FILE_LEVEL),
     // 日期后缀：默认带（YYYY-MM-DD）；LOG_FILE_DATE=off / 实例 file.date=false 时为单文件
     date: parseBoolOpt(env.LOG_FILE_DATE) ?? true,
     // 日期目录：true 时日期作为子目录（logs/2026-09-12/app.log），文件名不再带日期后缀
@@ -198,6 +271,8 @@ function buildConfig() {
 
   const cfg = {
     level: Object.hasOwn(LEVELS, rawLevel) ? rawLevel : 'info',
+    // 控制台通道独立级别门槛（LOG_CONSOLE_LEVEL）；null = 跟随全局 level
+    consoleLevel: parseLevelOpt(env.LOG_CONSOLE_LEVEL),
     debugKeywords: keywords,
     modules,
     maxStr,
@@ -205,7 +280,9 @@ function buildConfig() {
     fileName: env.LOG_FILE_NAME || 'app',
     file: fileCfg,
     consoleEnabled: parseBool(env.LOG_CONSOLE, true),
-    fileEnabled: parseBool(env.LOG_FILE, true),
+    // 文件通道默认关闭：需显式开启（LOG_FILE=true / configureLog({ file: true|{...} })）
+    // 设计意图：库默认只输出控制台，落盘由使用方按需开启
+    fileEnabled: parseBool(env.LOG_FILE, false),
     pretty: parseBool(env.LOG_PRETTY, !isProd),
     isProd,
     showDev: devOverride !== null ? devOverride : !isProd
@@ -214,6 +291,7 @@ function buildConfig() {
   // configureLog() 编程覆盖（优先级高于环境变量）
   const o = runtimeOverrides;
   if (o.level && Object.hasOwn(LEVELS, o.level)) cfg.level = o.level;
+  if (o.consoleLevel !== undefined) cfg.consoleLevel = parseLevelOpt(o.consoleLevel);
   if (o.dir) {
     cfg.dir = o.dir;
     cfg.file.dir = o.dir;
@@ -223,6 +301,7 @@ function buildConfig() {
     cfg.file.name = o.fileName;
   }
   if (o.ext) cfg.file.ext = o.ext;
+  if (o.fileLevel !== undefined) cfg.file.level = parseLevelOpt(o.fileLevel);
   if (typeof o.fileDate === 'boolean') cfg.file.date = o.fileDate;
   if (typeof o.dateDir === 'boolean') cfg.file.dateDir = o.dateDir;
   if (o.subdir !== undefined) cfg.file.subdir = parseSubdirOpt(o.subdir);
@@ -248,11 +327,17 @@ function buildConfig() {
     if (merged.date !== undefined) merged.date = parseBoolOpt(merged.date) ?? true;
     if (merged.dateDir !== undefined) merged.dateDir = parseBool(merged.dateDir, false);
     if (merged.subdir !== undefined) merged.subdir = parseSubdirOpt(merged.subdir);
+    if (merged.level !== undefined) merged.level = parseLevelOpt(merged.level);
     if (merged.error !== undefined && typeof merged.error !== 'boolean') {
       merged.error = parseBoolOpt(merged.error) ?? true;
     }
     cfg.file = { ...cfg.file, ...merged };
+    // 给了 file 配置对象 = 明确要写文件：自动开启文件通道
+    // （除非同一份 patch 里显式写了 file: false，那种情况前面已处理并被此处覆盖）
+    cfg.fileEnabled = true;
   }
+  // 显式 file: false 优先级最高，放在对象合并之后兜底
+  if (o.file === false) cfg.fileEnabled = false;
   if (typeof o.pretty === 'boolean') cfg.pretty = o.pretty;
   if (typeof o.showDev === 'boolean') cfg.showDev = o.showDev;
   if (o.debugKeywords) {
@@ -284,11 +369,23 @@ export function getLogConfig() {
 /**
  * 重新从环境变量构建配置（热更新；修改环境变量后调用，测试场景有用）。
  * 注意：configureLog() 的编程覆盖仍会叠加在环境变量之上。
+ * @param {object} [opts]
+ * @param {boolean} [opts.resetOverrides=false] true = 同时清空 configureLog() 的编程覆盖，
+ *        回到"纯环境变量"状态（测试隔离、进程内重置常用）
  * @returns {Readonly<object>} 新配置
  */
-export function reloadLogConfig() {
+export function reloadLogConfig(opts = {}) {
+  if (opts?.resetOverrides) runtimeOverrides = {};
   config = buildConfig();
   return config;
+}
+
+/**
+ * 清空 configureLog() 的编程覆盖，并重新构建配置（回到环境变量基线）。
+ * @returns {Readonly<object>} 新配置
+ */
+export function resetLogConfig() {
+  return reloadLogConfig({ resetOverrides: true });
 }
 
 /**

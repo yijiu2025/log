@@ -4,26 +4,43 @@
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
+/**
+ * 通道级级别配置：
+ * - 单个级别名 `'info'`     → 门槛语义：该级别及以上
+ * - `'all'`                → 全量（trace 起全记）
+ * - 数组 `['info','error']` → **白名单**：只记列出的级别
+ * - 逗号分隔 `'warn,error'` → 等同数组
+ * - `null` / 不填          → 不设通道级别，跟随全局 level
+ */
+export type LevelFilter = LogLevel | 'all' | LogLevel[] | string | null;
+
 /** 实例级配置（优先级高于模块级环境变量与全局配置） */
 export interface LoggerOptions {
   /** 本模块最低级别（默认跟随全局 LOG_LEVEL / LOG_LEVEL_<模块>） */
   level?: LogLevel;
   /** 本模块控制台开关 */
   console?: boolean;
+  /** 本模块控制台通道级别（覆盖全局 consoleLevel） */
+  consoleLevel?: LevelFilter;
   /**
    * 本模块文件开关 / 独立文件配置（仅 Node 生效，浏览器忽略）
-   * - true：跟随全局通道
-   * - false：本模块不写文件
+   *
+   * **重要**：给了对象即视为「开启本模块文件通道」，即使全局未开启文件也会落盘。
+   * 实例 file 配置与全局 file 是**覆盖**关系（不是叠加），因此不会重复写两份。
+   *
+   * - true：用全局的命名/目录配置写文件
+   * - false：本模块不写文件（全局开了也不写）
    * - 对象：写独立文件
-   *   - name：文件名前缀（生成 `<dir>/<name>[-日期]<ext>`）
+   *   - name：文件名（**默认 = 模块 tag**）
    *   - dir：目录（默认跟随全局）
    *   - ext：扩展名（默认 '.log'）
    *   - date：是否带日期后缀（默认 true；false = 单文件不按天滚动）
-   *   - dateDir：日期作为子目录 `<dir>/<日期>/`（默认 false）；启用后文件名不带日期后缀
+   *   - dateDir：日期作为子目录 `<dir>/<日期>/`（默认 false）
    *   - subdir：模块子目录。'auto'/true = 按 tag 首段自动分类；字符串 = 固定目录名
+   *   - level：本模块**文件通道**级别（'all' / 数组白名单 / 单级别），与全局 level 独立
    *   - keepDays：本模块滚动日志保留天数（0 = 不清理）
    *   - error：错误文件开关（默认 true）或自定义前缀字符串
-   *   - suffix：文件名后缀；'pid' = 进程号（多进程部署防行交错），其他字符串原样
+   *   - suffix：文件名后缀；'pid' = 进程号（多进程部署防行交错）
    */
   file?: boolean | {
     name?: string;
@@ -32,6 +49,7 @@ export interface LoggerOptions {
     date?: boolean;
     dateDir?: boolean;
     subdir?: string | boolean;
+    level?: LevelFilter;
     keepDays?: number;
     error?: boolean | string;
     suffix?: string | boolean;
@@ -88,6 +106,14 @@ export interface LogGlobalOptions {
   /** 单字段字符串长度上限（字符数，默认 2000；0 = 关闭截断），超长截断加 '…(len=N)' 标记 */
   maxStr?: number;
   console?: boolean;
+  /** 控制台通道级别（覆盖全局 level 对控制台的作用） */
+  consoleLevel?: LevelFilter;
+  /** 文件通道级别（实例级也可写在 file.level） */
+  fileLevel?: LevelFilter;
+  /**
+   * 文件通道配置（仅 Node）。
+   * **默认关闭**：不写此项则只输出控制台；给了对象即开启文件通道。
+   */
   file?: boolean | {
     name?: string;
     dir?: string;
@@ -95,6 +121,8 @@ export interface LogGlobalOptions {
     date?: boolean;
     dateDir?: boolean;
     subdir?: string | boolean;
+    /** 文件通道级别：'all' / ['info','error'] / 'info' */
+    level?: LevelFilter;
     keepDays?: number;
     error?: boolean | string;
     suffix?: string | boolean;
@@ -111,13 +139,34 @@ export interface LogContext {
   [key: string]: unknown;
 }
 
-export declare function createLogger(tag?: string, options?: LoggerOptions): AppLogger;
+/**
+ * 创建 logger —— **只有两个参数**：tag 与「是否注册为全局」。
+ * 所有配置一律走实例的 `config()`（可运行时改）。
+ *
+ * @param tag 模块标签，建议用文件路径点分形式，如 'auth.session'
+ * @param asGlobal true = 注册为全局 log（其他文件 `import { log }` 直接可用）
+ * @example
+ *   const log = createLogger('pay');                    // 普通实例
+ *   const log = createLogger('app', true);              // 注册为全局
+ *   createLogger('pay').config({ file: { level: 'all' } });
+ */
+export declare function createLogger(tag?: string, asGlobal?: boolean): AppLogger;
+/** 全局 log 门面：始终指向当前注册的全局实例（未注册时为 tag='app' 的默认实例） */
 export declare const logger: AppLogger;
-/** 零配置快捷入口（= 默认 logger，tag 'app'） */
+/** 零配置快捷入口（= 全局 log） */
 export declare const log: AppLogger;
+/** 注册某个 logger 为全局 log（等价 createLogger(tag, true)） */
+export declare function registerGlobalLogger(instance: AppLogger): AppLogger;
+/** 取当前全局 log 实例（未注册时为默认 app logger） */
+export declare function getGlobalLogger(): AppLogger;
 export declare function configureLog(patch: LogGlobalOptions): Record<string, unknown>;
 export declare function getLogConfig(): Readonly<Record<string, unknown>>;
-export declare function reloadLogConfig(): Readonly<Record<string, unknown>>;
+export declare function reloadLogConfig(opts?: { resetOverrides?: boolean }): Readonly<Record<string, unknown>>;
+/** 清空 configureLog 的编程覆盖并重建配置（回到环境变量基线） */
+export declare function resetLogConfig(): Readonly<Record<string, unknown>>;
+export declare function parseLevelOpt(value: unknown): string[] | null;
+export declare function levelPasses(allowList: string[] | null, level: string): boolean;
+export declare const LEVEL_ORDER: readonly LogLevel[];
 export declare function setLogContextProvider(fn: () => LogContext | undefined): void;
 export declare function isDebugTagEnabled(tag: string, keywords: Set<string>): boolean;
 export declare function tagMatchesKeyword(tag: string, kw: string): boolean;

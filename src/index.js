@@ -59,6 +59,7 @@ import { AppLogger } from './logger.js';
 import {
   getLogConfig,
   reloadLogConfig,
+  resetLogConfig,
   configureLog,
   isDebugTagEnabled,
   tagMatchesKeyword,
@@ -70,17 +71,84 @@ import { stdout } from './transports.js';
 import { sanitizeForLog, sanitizeUrl, sanitizeUserAgent } from './sanitize.js';
 
 /**
- * 创建带模块 tag 的 logger（推荐入口）
+ * 创建带模块 tag 的 logger。
+ *
+ * **只有两个参数**：tag、是否注册为全局。所有其他配置一律走 `config()`。
+ *
+ *   1. `createLogger('pay')`        —— 普通实例，本文件内使用
+ *   2. `createLogger('pay', true)`  —— **注册为全局 log**：
+ *        注册后其他文件直接 `import { log }` 即可用这个实例，无需再 createLogger。
+ *        放在入口文件（index.js / app.js）头部执行一次。
+ *        全局 log 是单例，后注册的覆盖先注册的。
+ *
+ *   之后一律用 config() 做配置（可随时运行时改）：
+ *     const log = createLogger('pay');
+ *     log.config({ level: 'info', file: { name: 'pay', level: 'all' } });
+ *
  * @param {string} [tag='app'] 模块标签，如 'auth.session'
- * @param {object|null} [options=null] 实例级配置 { level?, console?, file?, debug? }
+ * @param {boolean} [asGlobal=false] true = 注册为全局 log
  * @returns {AppLogger} logger 实例（级别方法 + always/dev/prod/file 变体 + config/child/time）
+ * @example
+ *   // app.js 头部：注册全局
+ *   createLogger('app', true);
+ *   // 其他文件：直接使用，无需再创建
+ *   import { log } from 'wb-logkit';
+ *   log.info('...');
  */
-export function createLogger(tag, options = null) {
-  return new AppLogger(tag || 'app', options);
+export function createLogger(tag, asGlobal = false) {
+  const instance = new AppLogger(tag || 'app', null);
+  if (asGlobal === true) registerGlobalLogger(instance);
+  return instance;
+}
+
+/** 全局已注册的 logger（null = 未注册，回退到默认 logger） */
+let globalLogger = null;
+
+/** 默认 app logger：未注册全局时 log 指向它 */
+const defaultLogger = new AppLogger('app');
+
+/**
+ * 全局 log 门面：始终把属性读写委托给"当前全局实例"。
+ *
+ * 为什么用 Proxy 而不是直接导出实例：ESM 的 `const` 导出无法重新赋值，
+ * 而注册通常是后发生的（app.js / index.js 头部）。Proxy 让 `import { log }`
+ * 拿到的引用永久有效，且注册、`log.config()` 运行时改写都能实时反映。
+ */
+const globalFacade = new Proxy(defaultLogger, {
+  get(_target, prop) {
+    const active = globalLogger || defaultLogger;
+    const value = active[prop];
+    return typeof value === 'function' ? value.bind(active) : value;
+  },
+  set(_target, prop, value) {
+    const active = globalLogger || defaultLogger;
+    active[prop] = value;
+    return true;
+  },
+  has(_target, prop) {
+    return prop in (globalLogger || defaultLogger);
+  }
+});
+
+/**
+ * 把某个 logger 注册为全局 log（`import { log }` 拿到它）。
+ * 之后对实例调用 `.config()` 会实时反映到全局 log（同一个对象）。
+ * @param {AppLogger} instance
+ * @returns {AppLogger} 传入的实例
+ */
+export function registerGlobalLogger(instance) {
+  if (!instance || typeof instance.info !== 'function') return instance;
+  globalLogger = instance;
+  return instance;
+}
+
+/** 返回当前全局 log 实例（未注册时为默认 app logger） */
+export function getGlobalLogger() {
+  return globalLogger || defaultLogger;
 }
 
 /** 全局默认 logger（脚本/兜底场景用，tag='app'） */
-export const logger = createLogger('app');
+export const logger = globalFacade;
 
 /**
  * 零配置快捷入口：`import { log } from 'wb-logkit'` 直接打印，
@@ -92,6 +160,7 @@ export { stdout as logStdout, stdout };
 export {
   getLogConfig,
   reloadLogConfig,
+  resetLogConfig,
   configureLog,
   isDebugTagEnabled,
   tagMatchesKeyword,

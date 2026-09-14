@@ -28,7 +28,7 @@
  * @author yijiu2025
  * @since 2026-09-10
  */
-import { LEVELS, getLogConfig, isDebugTagEnabled, matchModuleRule } from './config.js';
+import { LEVELS, getLogConfig, isDebugTagEnabled, levelPasses, matchModuleRule, parseLevelOpt } from './config.js';
 import { getLogContext } from './context.js';
 import { CORE_RECORD_KEYS, RESERVED_KEYS } from './record-schema.js';
 import { safeStringify } from './safe-stringify.js';
@@ -380,43 +380,81 @@ export class AppLogger {
     const consoleOn = inst?.console ?? rule?.console ?? cfg.consoleEnabled;
     let fileOn;
     const instFile = inst?.file;
+    // fileOpts：传给文件通道的实例级配置。
+    // 实例 file: true 时传空对象（不是 null），让运输层知道"实例明确要写文件"，
+    // 从而在全局 fileEnabled=false 时依然落盘。
+    let fileOpts = null;
     if (instFile === false) {
       fileOn = false;
-    } else if (instFile === true || (instFile && typeof instFile === 'object')) {
+    } else if (instFile === true) {
       fileOn = true;
+      fileOpts = {};
+    } else if (instFile && typeof instFile === 'object') {
+      fileOn = true;
+      fileOpts = instFile;
     } else {
       fileOn = rule?.file ?? cfg.fileEnabled;
     }
-    const fileOpts = instFile && typeof instFile === 'object' ? instFile : null;
+
+    // 通道级级别过滤（优先级：实例 > 全局）；null = 不限制
+    // 归一为"允许的级别名数组"：'info' → info 及以上；'all' → 全部；
+    // ['info','error'] → 仅这两个级别（白名单）
+    // 全局值在 config.js 已归一，实例值需现场归一（实例是原始值，可能未解析）
+    const consoleAllow =
+      inst?.consoleLevel !== undefined ? parseLevelOpt(inst.consoleLevel) : (cfg.consoleLevel ?? null);
+    const fileAllow = fileOpts?.level !== undefined ? parseLevelOpt(fileOpts.level) : (cfg.file?.level ?? null);
 
     // 环境门控：dev/prod 专属输出
     if (env === 'dev' && !cfg.showDev) return;
     if (env === 'prod' && !cfg.isProd) return;
 
+    const lv = LEVELS[level];
+    // debug/trace 是否经关键词/实例显式放开：放开时跳过通道级门槛，
+    // 因为 LOG_DEBUG 本身就是"我要看调试细节"的明确意图，不该再被通道门槛拦一次
+    let debugUnlocked = false;
+
     if (!force) {
       // debug/trace 门控：实例 debug 三态 > 关键词白名单（LOG_DEBUG / LOG_DEBUG_<模块>）
-      if (LEVELS[level] <= LEVELS.debug) {
+      if (lv <= LEVELS.debug) {
         if (inst?.debug === true) {
-          // 实例显式放开，直通
+          debugUnlocked = true;
         } else if (inst?.debug === false) {
           return;
-        } else if (!isDebugTagEnabled(this.tag, cfg.debugKeywords)) {
+        } else if (isDebugTagEnabled(this.tag, cfg.debugKeywords)) {
+          debugUnlocked = true;
+        } else {
           return;
         }
-      } else if (LEVELS[level] < threshold) {
+      } else if (lv < threshold) {
         return;
       }
     }
 
+    // 通道级过滤：
+    // - force（always）与 debug 关键词放行，跳过"常规级别门槛"
+    // - 但用户**显式配置**的通道级级别（consoleLevel / file.level）优先级更高，仍生效
+    //   例：LOG_DEBUG=auth 放开 debug 看细节，同时 file.level=warn → 文件只留 warn+
+    const consoleExplicit = consoleAllow != null;
+    const fileExplicit = fileAllow != null;
+
+    const consolePass = consoleExplicit ? levelPasses(consoleAllow, level) : force || debugUnlocked || lv >= threshold;
+    const filePass = fileExplicit ? levelPasses(fileAllow, level) : force || debugUnlocked || lv >= threshold;
+
+    let toConsole = consoleOn && consolePass;
+    let toFile = fileOn && filePass;
+
+    if (fileOnly) {
+      // file 变体：只留档、不刷控制台
+      toConsole = false;
+    }
+
+    // 两条通道都被过滤掉：无需构造 record
+    if (!toConsole && !toFile) return;
+
     const { msg, data, err } = parseArgs(args);
     const record = buildRecord(this.tag, level, msg, data, err);
 
-    if (fileOnly) {
-      // file 变体：只留档、不刷控制台（受文件开关约束）；fatal 同步落盘防崩溃丢失
-      if (fileOn) fileTransport.write(record, cfg, level === 'fatal', fileOpts);
-      return;
-    }
-    if (consoleOn) consoleTransport.write(record, cfg);
-    if (fileOn) fileTransport.write(record, cfg, level === 'fatal', fileOpts);
+    if (toConsole) consoleTransport.write(record, cfg);
+    if (toFile) fileTransport.write(record, cfg, level === 'fatal', fileOpts);
   }
 }
