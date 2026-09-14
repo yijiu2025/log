@@ -326,9 +326,29 @@ npm pack --dry-run                                                          → 
 | 代码修复 | ✅ 12/12 完成 |
 | ESLint / 测试 | ✅ 0 警告、54 + 673 全绿 |
 | 版本号 | ✅ 0.4.1 → **0.5.0** |
-| 提交 | ✅ `2aad119`（feat: 防静默失败——降级告警出口 + fatal 兜底 + 非法配置留痕） |
-| GitHub 推送 | ✅ `git ls-remote origin main` 确认为 `2aad119` |
-| npm 发布 | ⏸️ **待用户提供新 token**（`~/.npmrc` 内旧 token 已 401） |
+| 提交 | ✅ `2aad119` + `1cc1a1b` |
+| GitHub 推送 | ✅ `git ls-remote origin main` 确认为 `1cc1a1b` |
+| npm 发布 | ✅ **已发布** `wb-logkit@0.5.0`（`latest` tag 已指向 0.5.0） |
+| 真实安装回归 | ✅ 从 npm 装 0.5.0 跑 9 项行为验证全通过（非 workspace 软链） |
+
+### 真实包回归明细（`npm install wb-logkit@0.5.0` 后执行）
+
+```
+OK  ① fatal 双关 stderr 兜底
+OK  ② log.file.* 但文件关闭告警
+OK  ③ 非法 level 留痕
+OK  ④ 非法通道级别留痕
+OK  ⑤ 文件通道写入失败留痕
+OK  ⑥ 正常落盘无回归（主日志 2 行）
+OK  ⑥b 错误文件双写正常（全局默认前缀下命名为 error.log）
+OK  ⑦ 默认 fileEnabled=false
+OK  ⑧ 数组白名单只记列出的级别
+OK  ⑨ file.level=all 越过全局门槛（debug/trace 落盘）
+```
+
+**踩坑记录**：验证脚本最初误以为错误文件叫 `app-error.log`，实际全局默认前缀 `app` 时
+沿用旧约定命名为 `error.log`（自定义前缀时才为 `<name>-error.log`）。这是文档化的有意设计，
+脚本假设错误而非代码缺陷。
 
 ### 设计取舍说明
 
