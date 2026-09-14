@@ -38,6 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { safeStringify } from './safe-stringify.js';
+import { warnOnce } from './degraded.js';
 
 /**
  * 生成当天本地日期串 YYYY-MM-DD（用于文件滚动命名，与 record.t 本地时区基准一致）。
@@ -149,7 +150,9 @@ function stripAnsiDeep(value, depth = 4) {
  * 每天首次写入时清理过期日志。所有路径拼接都经 `safeSeg` + `isInside` 双重防线。
  *
  * 由 Node 入口 `index.node.js` 经 `setFileTransport()` 注入到 `transports.js`，
- * 浏览器环境不会加载本文件。任何写入/清理失败**静默**（控制台通道不受影响）。
+ * 浏览器环境不会加载本文件。任何写入/清理失败**不向上抛**（控制台通道不受影响），
+ * 但写入失败会按错误码去重后向 stderr 发一次降级告警（见 `degraded.js`）——
+ * 「日志静默丢失」本身就是必须被知道的故障。
  */
 class NodeFileTransport {
   constructor() {
@@ -157,7 +160,14 @@ class NodeFileTransport {
     this.dirs = new Map();
     /** @type {Set<string>} 本次进程内已执行过清理的目录+前缀（每天最多一次） */
     this.cleanedKeys = new Set();
-    /** 上次写入的日期（用于触发跨天清理） */
+    /**
+     * 进程级跨天哨兵：记录最近一次写入的日期。日期变化即视为跨天，清空
+     * `cleanedKeys` 让所有目录重新获得一次清理机会。
+     *
+     * 注意这是**全局单值**而非「每目录状态」——多个目录/多个 logger 共享它，
+     * 因此是「谁先跨天谁触发全局重置」。这是有意设计：跨天只需清空一次账本，
+     * 各目录的具体清理由 `cleanedKeys` 按 `dir|name|errBase|ext|suffix` 独立记账。
+     */
     this.lastWriteDate = '';
   }
 
@@ -204,7 +214,10 @@ class NodeFileTransport {
 
   /**
    * 清理目录中过期的滚动日志文件（只删匹配 <前缀>[-后缀]-YYYY-MM-DD<ext> 命名模式的文件）。
-   * 任何异常静默（清理失败不影响写入）。
+   *
+   * 异常不向上抛（清理失败不影响写入），但**非 ENOENT 的失败**（权限/占用等）
+   * 会按错误码去重后向 stderr 留痕一次，避免「以为清理了其实没清」。
+   *
    * @param {string} dir 日志目录
    * @param {string[]} bases 要清理的文件名前缀列表（主日志 + 错误文件）
    * @param {string} ext 扩展名
@@ -220,8 +233,16 @@ class NodeFileTransport {
     let files;
     try {
       files = fs.readdirSync(absDir);
-    } catch {
-      return; // 目录不存在或不可读：跳过
+    } catch (err) {
+      // 目录不存在（ENOENT）是常态：该目录本就不该被创建（清理路径不产生 mkdir 副作用）
+      // 其余错误（EACCES 等）说明日志目录不可读，留痕以免运维以为清理生效了
+      if (err?.code !== 'ENOENT') {
+        warnOnce(
+          `cleanup-readdir-${err?.code ?? 'UNKNOWN'}`,
+          `⚠️ [wb-logkit] 日志目录不可读，跳过过期清理(${err?.code}): ${absDir}\n`
+        );
+      }
+      return;
     }
 
     // 后缀位置固定夹在前缀与日期之间：base[-suffix]-YYYY-MM-DD<ext>
@@ -243,8 +264,14 @@ class NodeFileTransport {
       if (!isInside(absDir, target)) continue; // 路径越界防御（readdirSync 结果本应为纯文件名）
       try {
         fs.unlinkSync(target);
-      } catch {
-        /* 删除失败（占用/权限）：留待下次 */
+      } catch (err) {
+        // 删除失败（文件被占用/权限不足）：留待下次；非 ENOENT 时留痕一次
+        if (err?.code !== 'ENOENT') {
+          warnOnce(
+            `cleanup-unlink-${err?.code ?? 'UNKNOWN'}`,
+            `⚠️ [wb-logkit] 过期日志删除失败(${err?.code})，将留待下次清理: ${target}\n`
+          );
+        }
       }
     }
   }
@@ -254,6 +281,8 @@ class NodeFileTransport {
    * 只扫描 <baseDir> 下形如 YYYY-MM-DD 的目录名，且日期早于保留期才删；
    * 目录名不匹配（如用户自建的 other/）一律不动。
    * 整块删除，连同其下所有模块子目录（logs/2020-01-01/a、logs/2020-01-01/b 一并清理）。
+   *
+   * 与 `_cleanup` 同策略：失败不抛出，但非 ENOENT 的错误会去重留痕一次。
    * @param {string} baseDir 基础目录（如 logs）
    * @param {number} keepDays 保留天数（<=0 关闭）
    * @param {string} today 当天日期串（避免误删当天目录）
@@ -267,8 +296,15 @@ class NodeFileTransport {
     let entries;
     try {
       entries = fs.readdirSync(absBase, { withFileTypes: true });
-    } catch {
-      return; // 基础目录不存在：跳过
+    } catch (err) {
+      // 基础目录不存在是常态（清理路径不创建目录）；其余错误留痕
+      if (err?.code !== 'ENOENT') {
+        warnOnce(
+          `cleanup-readdir-${err?.code ?? 'UNKNOWN'}`,
+          `⚠️ [wb-logkit] 日志基础目录不可读，跳过日期目录清理(${err?.code}): ${absBase}\n`
+        );
+      }
+      return;
     }
 
     for (const ent of entries) {
@@ -278,8 +314,12 @@ class NodeFileTransport {
       if (!isInside(absBase, target)) continue; // 路径越界防御
       try {
         fs.rmSync(target, { recursive: true, force: true });
-      } catch {
-        /* 删除失败（占用/权限）：留待下次 */
+      } catch (err) {
+        // 整目录移除失败（占用/权限）：留待下次；留痕一次便于运维发现
+        warnOnce(
+          `cleanup-rmdir-${err?.code ?? 'UNKNOWN'}`,
+          `⚠️ [wb-logkit] 过期日期目录删除失败(${err?.code})，将留待下次清理: ${target}\n`
+        );
       }
     }
   }
@@ -322,7 +362,9 @@ class NodeFileTransport {
    *
    * 流程：解析配置（实例 fileOpts 优先于全局 cfg.file）→ 解析目录/文件名 →
    * 剥离 ANSI 颜色码 → 同步追加主日志 → warn+ 双写错误文件 → 触发每日清理。
-   * 整体 try/catch 静默：文件通道失败绝不影响业务与控制台输出。
+   *
+   * 失败策略：异常**不向上抛**（绝不污染业务与控制台输出），但会按错误码去重后
+   * 向 stderr 发一次降级告警（见 `degraded.js`）——文件通道坏掉不能无声无息。
    *
    * @param {object} record - 结构化日志记录（`buildRecord` 产物：{ t, level, tag, msg, ...data }）；
    *        本函数会**原地剥离**其字符串中的 ANSI 颜色码（该对象为本次 emit 私有，安全）
@@ -331,7 +373,7 @@ class NodeFileTransport {
    * @param {object|null} [fileOpts=null] 实例级文件配置（优先级最高）；
    *        键：`{ name?, dir?, ext?, date?, dateDir?, subdir?, level?, keepDays?, error?, suffix? }`。
    *        非 null 即为「实例明确要写文件」，全局 `fileEnabled=false` 时依然落盘。
-   * @returns {void} 任何失败静默（控制台通道仍工作）
+   * @returns {void} 失败静默降级（控制台通道仍工作，stderr 留一条去重告警）
    */
   write(record, cfg, sync = false, fileOpts = null) {
     // 全局文件通道关闭时，仍允许**实例级显式 file 配置**生效（实例优先级最高）：
@@ -389,8 +431,14 @@ class NodeFileTransport {
           }
         }
       }
-    } catch {
-      // 文件通道失败静默（控制台通道仍然工作）
+    } catch (err) {
+      // 文件通道失败**必须留痕**：日志落不下去本身就是必须被运维知道的事故
+      // （磁盘满 / 目录不可写 / 权限不足）。异常不向上抛（不能污染业务），
+      // 但按错误码去重后向 stderr 提示一次，避免磁盘满时每条日志都刷屏。
+      warnOnce(
+        `file-write-${err?.code ?? 'UNKNOWN'}`,
+        `❌ [wb-logkit] 文件通道写入失败(${err?.code ?? 'UNKNOWN'}): ${err?.message ?? err}；日志仅剩控制台通道\n`
+      );
     }
   }
 

@@ -31,10 +31,10 @@ import { createLogger } from 'wb-logkit';
 // tag 建议 = 文件路径的点分形式，便于按模块过滤
 const log = createLogger('auth.session');
 
-log.info('用户登录', { userId: 1 });   // 常规日志（对象自动并入 data）
-log.warn('缓存降级', err);             // 警告（Error 自动提取 stack）
-log.error('查询失败', err);            // 错误
-log.debug('缓存未命中', key);          // 调试：默认静默，需关键词放开
+log.info('用户登录', { userId: 1 }); // 常规日志（对象自动并入 data）
+log.warn('缓存降级', err); // 警告（Error 自动提取 stack）
+log.error('查询失败', err); // 错误
+log.debug('缓存未命中', key); // 调试：默认静默，需关键词放开
 ```
 
 ### 注册为全局 log
@@ -44,7 +44,7 @@ log.debug('缓存未命中', key);          // 调试：默认静默，需关键
 ```js
 // app.js —— 只需一次
 import { createLogger } from 'wb-logkit';
-createLogger('app', true);          // 第二个参数 true = 注册为全局
+createLogger('app', true); // 第二个参数 true = 注册为全局
 
 // 任意其他文件 —— 无需再 createLogger
 import { log } from 'wb-logkit';
@@ -60,17 +60,18 @@ log.info('直接可用');
 const log = createLogger('pay');
 
 log.config({
-  level: 'info',                       // 本模块总级别
-  console: true,                       // 控制台开关
-  consoleLevel: 'warn',                // 控制台通道级别：只打 warn+
-  file: {                              // ← 给 file 即开启本模块文件通道
-    name: 'pay',                       //   文件名（默认 = tag）
-    level: 'all'                       //   文件记全量（含 debug/trace）
+  level: 'info', // 本模块总级别
+  console: true, // 控制台开关
+  consoleLevel: 'warn', // 控制台通道级别：只打 warn+
+  file: {
+    // ← 给 file 即开启本模块文件通道
+    name: 'pay', //   文件名（默认 = tag）
+    level: 'all' //   文件记全量（含 debug/trace）
   }
 });
 
 // 也可随时改回来
-log.config({ file: false });           // 本模块不再写文件
+log.config({ file: false }); // 本模块不再写文件
 ```
 
 `config()` 是**累积合并**的，返回实例本身可链式调用。
@@ -87,20 +88,20 @@ log.config({ file: false });           // 本模块不再写文件
 
 两个正交维度，任意组合，**顺序无关**：
 
-| 维度 | 取值 | 含义 |
-| --- | --- | --- |
-| 必要性 | 默认 / `always` | `always` 无视一切门控，必输 |
-| 环境 | 任意 / `dev` / `prod` | 仅开发 / 仅生产环境输出 |
-| 通道 | 控制台+文件 / `file` | `file` 只写文件、不刷控制台 |
+| 维度   | 取值                  | 含义                        |
+| ------ | --------------------- | --------------------------- |
+| 必要性 | 默认 / `always`       | `always` 无视一切门控，必输 |
+| 环境   | 任意 / `dev` / `prod` | 仅开发 / 仅生产环境输出     |
+| 通道   | 控制台+文件 / `file`  | `file` 只写文件、不刷控制台 |
 
 ```js
-log.always('系统启动完成');               // 必输（= log.always.info(...)）
-log.always.error('配置校验失败');          // 必输的 error
-log.dev.debug('开发期排查明细');           // 仅开发 + 关键词控制
-log.prod.error('生产专用错误提示');        // 仅生产的 error
-log.dev.always.info('仅开发的必输信息');   // 组合：log.always.dev.info 同义
-log.file.info('详细数据快照');             // 只进文件，不刷屏
-log.file.always.error('敏感堆栈留档');     // 组合任意维度
+log.always('系统启动完成'); // 必输（= log.always.info(...)）
+log.always.error('配置校验失败'); // 必输的 error
+log.dev.debug('开发期排查明细'); // 仅开发 + 关键词控制
+log.prod.error('生产专用错误提示'); // 仅生产的 error
+log.dev.always.info('仅开发的必输信息'); // 组合：log.always.dev.info 同义
+log.file.info('详细数据快照'); // 只进文件，不刷屏
+log.file.always.error('敏感堆栈留档'); // 组合任意维度
 ```
 
 ### 3. 关键词调试
@@ -122,12 +123,12 @@ LOG_DEBUG=*               # 放开全部
 // ① 实例级（优先级最高）
 const log = createLogger('pay.charge');
 log.config({
-  level: 'debug',             // 本模块最低级别
-  console: true,              // 本模块控制台开关
-  file: { name: 'pay' },      // 独立文件：logs/pay-YYYY-MM-DD.log
-  debug: true                 // 本模块 debug 免关键词直接输出（false = 强制静默）
+  level: 'debug', // 本模块最低级别
+  console: true, // 本模块控制台开关
+  file: { name: 'pay' }, // 独立文件：logs/pay-YYYY-MM-DD.log
+  debug: true // 本模块 debug 免关键词直接输出（false = 强制静默）
 });
-log.config({ level: 'warn' });  // 运行时热更新，返回自身可链式调用
+log.config({ level: 'warn' }); // 运行时热更新，返回自身可链式调用
 
 // ② 模块级（环境变量，无需改代码）
 //    LOG_LEVEL_AUTH=info        auth 模块最低级别
@@ -156,16 +157,16 @@ configureLog({
 // ① 全局开启（推荐，写在 app.js 的 configureLog 里）——所有 logger 一起写文件
 configureLog({
   file: {
-    name: 'app',      // 文件名前缀，默认 app；不配也算「有 file 配置」，同样开启
-    dir: 'logs',      // 目录，不存在自动创建
-    ext: '.log',      // 扩展名，如 .txt
-    suffix: '',       // 文件名后缀：'pid' = 进程号（多进程防行交错）；或自定义字符串
-    date: true,       // 文件名带日期后缀；false = 单文件
-    dateDir: false,   // 日期作为子目录：logs/2026-09-12/app.log
-    subdir: false,    // 模块子目录：'auto' = 按 tag 首段分类；字符串 = 固定目录名
-    level: 'info',    // 文件记录等级：'info' = info 及以上；'all'；['info','error']；'warn,error'
-    error: true,      // 错误文件：true 默认名 / false 关闭 / 字符串自定义前缀
-    keepDays: 30      // 保留天数，按天自动清理；0 = 永久保留
+    name: 'app', // 文件名前缀，默认 app；不配也算「有 file 配置」，同样开启
+    dir: 'logs', // 目录，不存在自动创建
+    ext: '.log', // 扩展名，如 .txt
+    suffix: '', // 文件名后缀：'pid' = 进程号（多进程防行交错）；或自定义字符串
+    date: true, // 文件名带日期后缀；false = 单文件
+    dateDir: false, // 日期作为子目录：logs/2026-09-12/app.log
+    subdir: false, // 模块子目录：'auto' = 按 tag 首段分类；字符串 = 固定目录名
+    level: 'info', // 文件记录等级：'info' = info 及以上；'all'；['info','error']；'warn,error'
+    error: true, // 错误文件：true 默认名 / false 关闭 / 字符串自定义前缀
+    keepDays: 30 // 保留天数，按天自动清理；0 = 永久保留
   }
 });
 
@@ -185,14 +186,14 @@ createLogger('process').config({ file: { name: 'process', level: 'all', error: t
 
 控制哪些级别进文件，与全局 `level`、控制台门槛互相独立：
 
-| 写法 | 含义 |
-| --- | --- |
-| 不填 | 跟随全局门槛（`level` + debug 解锁） |
-| `'info'` | info 及以上 |
-| `'all'` / `'*'` | 全量，含 debug/trace |
-| `['info','error']` | 白名单：只记这两个级别 |
-| `'warn,error'` | 逗号串，等价于数组 |
-| `'off'` / `null` | 关闭该 channel |
+| 写法               | 含义                                 |
+| ------------------ | ------------------------------------ |
+| 不填               | 跟随全局门槛（`level` + debug 解锁） |
+| `'info'`           | info 及以上                          |
+| `'all'` / `'*'`    | 全量，含 debug/trace                 |
+| `['info','error']` | 白名单：只记这两个级别               |
+| `'warn,error'`     | 逗号串，等价于数组                   |
+| `'off'` / `null`   | 关闭该 channel                       |
 
 > **显式配置 > 全局门槛**：只要写了 `file.level`（如 `'all'`），它就**优先于全局 `level`**，连 `debug`/`trace` 也会落盘，不需要再配 `LOG_DEBUG`。
 > 全局 `level` 管的是「默认行为」——没写通道级别时才用它。一句话：**门槛管默认，显式配置说了算**。
@@ -211,11 +212,11 @@ createLogger('process').config({ file: { name: 'process', level: 'all', error: t
 
 默认保持平铺，以上新能力**全部为新增可选**，不改变既有默认行为。
 
-| 模式 | 配置 | 产出 |
-| --- | --- | --- |
-| ① 平铺（默认） | `{}` | `logs/app-2026-09-12.log` |
-| ② 日期目录 | `{ dateDir: true }` | `logs/2026-09-12/app.log` |
-| ③ 模块子目录 | `{ subdir: 'auto' }` | `logs/app-2026-09-12.log`、`logs/firewall/app-2026-09-12.log` |
+| 模式                      | 配置                                | 产出                                                          |
+| ------------------------- | ----------------------------------- | ------------------------------------------------------------- |
+| ① 平铺（默认）            | `{}`                                | `logs/app-2026-09-12.log`                                     |
+| ② 日期目录                | `{ dateDir: true }`                 | `logs/2026-09-12/app.log`                                     |
+| ③ 模块子目录              | `{ subdir: 'auto' }`                | `logs/app-2026-09-12.log`、`logs/firewall/app-2026-09-12.log` |
 | ④ 日期 + 模块（推的二级） | `{ dateDir: true, subdir: 'auto' }` | `logs/2026-09-12/app.log`、`logs/2026-09-12/firewall/app.log` |
 
 `subdir` 三种取值：
@@ -227,16 +228,16 @@ createLogger('process').config({ file: { name: 'process', level: 'all', error: t
 ```js
 // 每个模块独立文件 + 按 tag 自动分目录 + 日期二级目录
 createLogger('firewall.engine', true).config({ file: { subdir: 'auto' } });
-createLogger('oauth21.token',   true).config({ file: { name: 'oauth', subdir: 'auto' } });
-configureLog({ file: { dateDir: true } });   // 全局：日期做一级目录
+createLogger('oauth21.token', true).config({ file: { name: 'oauth', subdir: 'auto' } });
+configureLog({ file: { dateDir: true } }); // 全局：日期做一级目录
 ```
 
 产出文件：
 
-| 文件 | 命名规则 | 内容 |
-| --- | --- | --- |
-| 主日志 | `<name>-YYYY-MM-DD.log` | 全部级别，JSON 行，按天滚动 |
-| 错误日志 | `<name>-error-YYYY-MM-DD.log` | warn 及以上 |
+| 文件         | 命名规则                      | 内容                               |
+| ------------ | ----------------------------- | ---------------------------------- |
+| 主日志       | `<name>-YYYY-MM-DD.log`       | 全部级别，JSON 行，按天滚动        |
+| 错误日志     | `<name>-error-YYYY-MM-DD.log` | warn 及以上                        |
 | 日期目录模式 | `<dir>/YYYY-MM-DD/<name>.log` | 日期为子目录，文件名不再带日期后缀 |
 
 写入使用 `appendFileSync` 同步落盘，崩溃安全。清理策略：
@@ -246,29 +247,29 @@ configureLog({ file: { dateDir: true } });   // 全局：日期做一级目录
 
 ## 环境变量
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `LOG_LEVEL` | `info` | info 及以上级别的门槛 |
-| `LOG_DEBUG` | 空 | debug/trace 白名单关键词 |
-| `LOG_DIR` | `logs` | 日志文件目录 |
-| `LOG_FILE_NAME` | `app` | 主日志文件名前缀 |
-| `LOG_FILE_EXT` | `.log` | 文件扩展名 |
-| `LOG_FILE_DATE` | `true` | 文件名日期后缀（`off` = 单文件） |
-| `LOG_DATE_DIR` | `false` | 日期作为子目录（`on` = `logs/2026-09-12/app.log`） |
-| `LOG_SUBDIR` | 空 | 模块子目录：`auto`/`true` = 按 tag 首段；或固定目录名 |
-| `LOG_ERROR_FILE` | `true` | 错误文件开关 |
-| `LOG_KEEP_DAYS` | `30` | 日志保留天数（`0` = 永久保留） |
-| `LOG_FILE_SUFFIX` | 空 | 文件名后缀：`pid` = 进程号（多进程部署防行交错）；或自定义字符串 |
-| `LOG_MAX_STR` | `2000` | 单字段字符串长度上限（字符数），超长截断加 `…(len=N)` 标记；`0` = 关闭 |
-| `LOG_CONSOLE` | `true` | 控制台开关 |
-| `LOG_CONSOLE_LEVEL` | 空 | 控制台记录等级：`info` / `all` / `error,warn` / `debug` |
-| `LOG_FILE` | `false` | 文件开关（**默认关闭**，需显式开启） |
-| `LOG_FILE_LEVEL` | 空 | 文件记录等级：`info` / `all` / `error,warn` / `debug` |
-| `LOG_PRETTY` | 非 prod 为 `true` | 控制台彩色可读 / JSON 行 |
-| `LOG_DEV` | 随 `NODE_ENV` | dev 专属输出强制开关 |
-| `LOG_LEVEL_<NAME>` | — | 模块级最低级别覆盖 |
-| `LOG_CONSOLE_<NAME>` | — | 模块级控制台开关 |
-| `LOG_FILE_<NAME>` | — | 模块级文件开关（`true` 会同时开启该模块的文件输出） |
+| 变量                 | 默认              | 说明                                                                   |
+| -------------------- | ----------------- | ---------------------------------------------------------------------- |
+| `LOG_LEVEL`          | `info`            | info 及以上级别的门槛                                                  |
+| `LOG_DEBUG`          | 空                | debug/trace 白名单关键词                                               |
+| `LOG_DIR`            | `logs`            | 日志文件目录                                                           |
+| `LOG_FILE_NAME`      | `app`             | 主日志文件名前缀                                                       |
+| `LOG_FILE_EXT`       | `.log`            | 文件扩展名                                                             |
+| `LOG_FILE_DATE`      | `true`            | 文件名日期后缀（`off` = 单文件）                                       |
+| `LOG_DATE_DIR`       | `false`           | 日期作为子目录（`on` = `logs/2026-09-12/app.log`）                     |
+| `LOG_SUBDIR`         | 空                | 模块子目录：`auto`/`true` = 按 tag 首段；或固定目录名                  |
+| `LOG_ERROR_FILE`     | `true`            | 错误文件开关                                                           |
+| `LOG_KEEP_DAYS`      | `30`              | 日志保留天数（`0` = 永久保留）                                         |
+| `LOG_FILE_SUFFIX`    | 空                | 文件名后缀：`pid` = 进程号（多进程部署防行交错）；或自定义字符串       |
+| `LOG_MAX_STR`        | `2000`            | 单字段字符串长度上限（字符数），超长截断加 `…(len=N)` 标记；`0` = 关闭 |
+| `LOG_CONSOLE`        | `true`            | 控制台开关                                                             |
+| `LOG_CONSOLE_LEVEL`  | 空                | 控制台记录等级：`info` / `all` / `error,warn` / `debug`                |
+| `LOG_FILE`           | `false`           | 文件开关（**默认关闭**，需显式开启）                                   |
+| `LOG_FILE_LEVEL`     | 空                | 文件记录等级：`info` / `all` / `error,warn` / `debug`                  |
+| `LOG_PRETTY`         | 非 prod 为 `true` | 控制台彩色可读 / JSON 行                                               |
+| `LOG_DEV`            | 随 `NODE_ENV`     | dev 专属输出强制开关                                                   |
+| `LOG_LEVEL_<NAME>`   | —                 | 模块级最低级别覆盖                                                     |
+| `LOG_CONSOLE_<NAME>` | —                 | 模块级控制台开关                                                       |
+| `LOG_FILE_<NAME>`    | —                 | 模块级文件开关（`true` 会同时开启该模块的文件输出）                    |
 
 ## 浏览器使用
 
@@ -278,8 +279,8 @@ configureLog({ file: { dateDir: true } });   // 全局：日期做一级目录
 import { createLogger } from 'wb-logkit';
 
 const log = createLogger('app.user');
-log.info('hello');                    // 正常输出
-log.file.info('仅 Node 生效');         // 浏览器中安全 no-op
+log.info('hello'); // 正常输出
+log.file.info('仅 Node 生效'); // 浏览器中安全 no-op
 ```
 
 - 打包安全：`node:fs` 等仅存在于 `index.node.js` 分支，Vite / webpack 不会打包进浏览器产物
@@ -289,6 +290,12 @@ log.file.info('仅 Node 生效');         // 浏览器中安全 no-op
 
 - **自动脱敏**：`password` / `token` / `secret` / `key` / `cookie` 等字段递归（3 层）输出为 `***`；超过 3 层的嵌套部分整体替换为 `[maxDepth]` 占位符，绝不透传未脱敏的原始对象（仅作用于对象/数组参数，`msg` 字符串不做脱敏——外部输入请先截断再入日志）
 - **永不抛异常**：日志调用自身绝不把错误抛进业务代码——循环引用、BigInt、Symbol 等经 `safeStringify` 安全序列化（`[Circular]` / `123n` / `Symbol(x)`），序列化意外失败时兜底写 stderr 降级提示
+- **故障不静默**：库自身出问题时**不吭声地丢日志**是最糟的结果，因此以下场景会向 stderr 发一次降级告警（浏览器退回 `console.error`），并按错误码/故障类型**去重限流**（同类故障每进程只提示一次，避免磁盘满时刷屏）：
+  - 文件通道写入失败（磁盘满 `ENOSPC`、目录不可写 `EACCES` 等）→ 提示日志仅剩控制台通道
+  - 过期日志清理失败（非 `ENOENT`，即权限/占用）→ 提示留待下次清理
+  - `fatal` 在控制台与文件**双双关闭**时 → 仍裸写一条 stderr（进程级故障不可丢失）
+  - 调用了 `log.file.*` 但文件通道未开启 → 提示这条日志两头都没写出
+  - `configureLog` 收到**非法级别名**（如 `'inf'`、`['warn','erro']`）→ 提示已忽略及当前生效值
 - **超长截断**：单字段字符串默认 2000 字符上限（`LOG_MAX_STR` 可调，0 关闭），防单条日志撑爆文件
 - **时区一致**：`record.t` 为本地时区 ISO 8601（含偏移量），与文件滚动日期同基准，跨午夜不出现文件名与内容时间错位
 - **多进程友好**：`LOG_FILE_SUFFIX=pid` 按进程分文件防行交错，过期清理按数字段通配连走孤儿文件
@@ -299,20 +306,20 @@ log.file.info('仅 Node 生效');         // 浏览器中安全 no-op
 
 ## API 速查
 
-| 导出 | 说明 |
-| --- | --- |
-| `createLogger(tag, asGlobal?)` | 创建模块 logger；`asGlobal = true` 同时注册为全局（推荐入口） |
-| `log` / `logger` | 全局 logger 门面（未注册时为 tag = `app` 的默认实例） |
-| `registerGlobalLogger(instance)` / `getGlobalLogger()` | 手动注册 / 读取当前全局实例 |
-| `configureLog(options)` | 全局编程配置（一般只在入口调用一次） |
-| `getLogConfig()` / `reloadLogConfig(opts?)` | 读取配置 / 重载环境变量 |
-| `resetLogConfig()` | 清空运行时覆盖并重载（测试隔离用） |
-| `parseLevelOpt(v)` / `levelPasses(list, level)` / `LEVEL_ORDER` | 等级白名单解析与判定工具 |
-| `AppLogger` | logger 类（可 `new` 或继承） |
-| `logStdout` / `stdout` | 无装饰原始输出 |
-| `setLogContextProvider(fn)` | 注入请求上下文 |
-| `sanitizeForLog` / `sanitizeUrl` / `sanitizeUserAgent` | 脱敏工具 |
-| `Logger`（默认导出） | 兼容旧 API 的静态调用包装 |
+| 导出                                                            | 说明                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------- |
+| `createLogger(tag, asGlobal?)`                                  | 创建模块 logger；`asGlobal = true` 同时注册为全局（推荐入口） |
+| `log` / `logger`                                                | 全局 logger 门面（未注册时为 tag = `app` 的默认实例）         |
+| `registerGlobalLogger(instance)` / `getGlobalLogger()`          | 手动注册 / 读取当前全局实例                                   |
+| `configureLog(options)`                                         | 全局编程配置（一般只在入口调用一次）                          |
+| `getLogConfig()` / `reloadLogConfig(opts?)`                     | 读取配置 / 重载环境变量                                       |
+| `resetLogConfig()`                                              | 清空运行时覆盖并重载（测试隔离用）                            |
+| `parseLevelOpt(v)` / `levelPasses(list, level)` / `LEVEL_ORDER` | 等级白名单解析与判定工具                                      |
+| `AppLogger`                                                     | logger 类（可 `new` 或继承）                                  |
+| `logStdout` / `stdout`                                          | 无装饰原始输出                                                |
+| `setLogContextProvider(fn)`                                     | 注入请求上下文                                                |
+| `sanitizeForLog` / `sanitizeUrl` / `sanitizeUserAgent`          | 脱敏工具                                                      |
+| `Logger`（默认导出）                                            | 兼容旧 API 的静态调用包装                                     |
 
 ## 源码结构
 
@@ -326,6 +333,7 @@ src/
 ├── transports.js           # 控制台通道 + 文件通道注入器
 ├── file-transport.node.js  # Node 文件通道（同步落盘、按天滚动、按天清理）
 ├── context.js              # 上下文提供器（requestId 注入）
+├── degraded.js             # 降级告警出口（stderr 裸写 + 去重限流）
 ├── safe-stringify.js       # 安全序列化（循环引用/BigInt 永不抛异常）
 └── sanitize.js             # 日志脱敏
 ```

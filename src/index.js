@@ -125,6 +125,10 @@ const defaultLogger = new AppLogger('app');
  * 为什么用 Proxy 而不是直接导出实例：ESM 的 `const` 导出无法重新赋值，
  * 而注册通常是后发生的（app.js / index.js 头部）。Proxy 让 `import { log }`
  * 拿到的引用永久有效，且注册、`log.config()` 运行时改写都能实时反映。
+ *
+ * 反射一致性：`get`/`set`/`has` 之外还实现了 `ownKeys` 与 `getOwnPropertyDescriptor`，
+ * 否则 `Object.keys(log)` / `JSON.stringify(log)` 会暴露 Proxy target（默认实例）的
+ * 键，而非当前 active 实例——注册新实例后反射结果会与实际属性对不上。
  */
 const globalFacade = new Proxy(defaultLogger, {
   get(_target, prop) {
@@ -139,6 +143,16 @@ const globalFacade = new Proxy(defaultLogger, {
   },
   has(_target, prop) {
     return prop in (globalLogger || defaultLogger);
+  },
+  ownKeys() {
+    return Reflect.ownKeys(globalLogger || defaultLogger);
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    // 描述符必须取自 active 实例；不可配置属性会让代理不变式校验失败，
+    // 因此统一返回可配置描述符（对日志门面而言只读反射无需严格语义）
+    const active = globalLogger || defaultLogger;
+    const desc = Object.getOwnPropertyDescriptor(active, prop);
+    return desc ? { ...desc, configurable: true } : undefined;
   }
 });
 
@@ -189,10 +203,14 @@ export { AppLogger };
  */
 class Logger {
   /**
-   * 记录认证/授权事件（保留原签名）
+   * 记录认证/授权事件（保留原签名）。
+   *
+   * 保留 `async` 仅为兼容旧调用方的 `await Logger.auth(...)`（`await` 非 Promise 也合法，
+   * 但保持 async 签名可避免调用方误以为无需 await）。函数体本身全同步、无 await。
+   *
    * @param {Object} ctx - 兼容的请求上下文对象（读取 state.clientInfo / request.id）
    * @param {object} [options] - 日志选项 { event, uid, appId, details }
-   * @returns {Promise<void>}
+   * @returns {Promise<void>} 已 resolve 的 Promise（内部同步完成写入）
    */
   static async auth(ctx, { event, uid, appId, details = {} } = {}) {
     const { ip, region, city } = ctx?.state?.clientInfo || {};

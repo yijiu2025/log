@@ -45,18 +45,20 @@ export interface LoggerOptions {
    *   - error：错误文件开关（默认 true）或自定义前缀字符串
    *   - suffix：文件名后缀；'pid' = 进程号（多进程部署防行交错）
    */
-  file?: boolean | {
-    name?: string;
-    dir?: string;
-    ext?: string;
-    date?: boolean;
-    dateDir?: boolean;
-    subdir?: string | boolean;
-    level?: LevelFilter;
-    keepDays?: number;
-    error?: boolean | string;
-    suffix?: string | boolean;
-  };
+  file?:
+    | boolean
+    | {
+        name?: string;
+        dir?: string;
+        ext?: string;
+        date?: boolean;
+        dateDir?: boolean;
+        subdir?: string | boolean;
+        level?: LevelFilter;
+        keepDays?: number;
+        error?: boolean | string;
+        suffix?: string | boolean;
+      };
   /** true = 本模块 debug/trace 免关键词直通；false = 强制静默 */
   debug?: boolean;
 }
@@ -117,19 +119,21 @@ export interface LogGlobalOptions {
    * 文件通道配置（仅 Node）。
    * **默认关闭**：不写此项则只输出控制台；给了对象即开启文件通道。
    */
-  file?: boolean | {
-    name?: string;
-    dir?: string;
-    ext?: string;
-    date?: boolean;
-    dateDir?: boolean;
-    subdir?: string | boolean;
-    /** 文件通道级别：'all' / ['info','error'] / 'info' */
-    level?: LevelFilter;
-    keepDays?: number;
-    error?: boolean | string;
-    suffix?: string | boolean;
-  };
+  file?:
+    | boolean
+    | {
+        name?: string;
+        dir?: string;
+        ext?: string;
+        date?: boolean;
+        dateDir?: boolean;
+        subdir?: string | boolean;
+        /** 文件通道级别：'all' / ['info','error'] / 'info' */
+        level?: LevelFilter;
+        keepDays?: number;
+        error?: boolean | string;
+        suffix?: string | boolean;
+      };
   pretty?: boolean;
   showDev?: boolean;
   debugKeywords?: string | string[];
@@ -173,13 +177,16 @@ export declare const LEVEL_ORDER: readonly LogLevel[];
 export declare function setLogContextProvider(fn: () => LogContext | undefined): void;
 export declare function isDebugTagEnabled(tag: string, keywords: Set<string>): boolean;
 export declare function tagMatchesKeyword(tag: string, kw: string): boolean;
-export declare function matchModuleRule(
-  tag: string,
-  modules: Map<string, object>
-): object | null;
+export declare function matchModuleRule(tag: string, modules: Map<string, object>): object | null;
 export declare function logStdout(text: unknown): void;
 export declare const stdout: (text: unknown) => void;
-export declare function sanitizeForLog<T>(obj: T, depth?: number): T;
+/**
+ * 脱敏对象（递归，返回副本，不修改入参）。
+ *
+ * 返回类型为 `unknown` 而非 `T`：深度耗尽时返回的是字符串 `'[maxDepth]'`，
+ * 非对象入参原样返回——因此输出类型与输入类型并不总是相同，用 `T` 会误导调用方。
+ */
+export declare function sanitizeForLog(obj: unknown, depth?: number): unknown;
 export declare function sanitizeUrl(url: string): string;
 export declare function sanitizeUserAgent(ua: string): string;
 /** 安全序列化：循环引用/BigInt/Symbol 等任何输入都不抛异常 */
@@ -188,10 +195,7 @@ export declare const AppLogger: new (tag?: string, options?: LoggerOptions | nul
 
 /** 兼容旧 API：静态调用委托给默认 logger */
 declare const LoggerDefault: {
-  auth(
-    ctx: unknown,
-    options?: { event: string; uid?: string; appId?: string; details?: object }
-  ): Promise<void>;
+  auth(ctx: unknown, options?: { event: string; uid?: string; appId?: string; details?: object }): Promise<void>;
   info(message: unknown, ...rest: unknown[]): void;
   warn(message: unknown, ...rest: unknown[]): void;
   error(message: unknown, ...rest: unknown[]): void;

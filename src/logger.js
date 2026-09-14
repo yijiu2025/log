@@ -36,6 +36,7 @@
  */
 import { LEVELS, getLogConfig, isDebugTagEnabled, levelPasses, matchModuleRule, parseLevelOpt } from './config.js';
 import { getLogContext } from './context.js';
+import { writeRawStderr, warnOnce } from './degraded.js';
 import { CORE_RECORD_KEYS, RESERVED_KEYS } from './record-schema.js';
 import { safeStringify } from './safe-stringify.js';
 import { sanitizeForLog } from './sanitize.js';
@@ -110,6 +111,10 @@ function isPlainObject(value) {
  * - 普通对象   → 浅合并进 data（递归脱敏）
  * - Date/数组  → 序列化为字符串
  * - 其他       → 空格拼接到 msg
+ *
+ * **不做 printf 风格插值**：与 `console.log('a %s', b)` 不同，本库不解析 `%s`/`%d` 占位符，
+ * `%s` 会原样出现在 msg 里（需要格式化请先自行 `util.format` 或模板字符串）。
+ *
  * @param {Array} args - 日志方法的原始变参（如 log.info('a', {b:1}, err) 的 arguments）
  * @returns {{msg: string, data: object, err: (Error|undefined)}} msg 为拼接后的消息
  *          （无显式消息且带 Error 时取 err.message），data 为脱敏合并后的业务字段，err 取第一个 Error
@@ -370,17 +375,13 @@ export class AppLogger {
     try {
       this._emitInner(level, args, opts);
     } catch (err) {
-      try {
-        // 尽力向 stderr 裸写一条降级提示；浏览器退回 console.error
-        const line = `❌ [wb-logkit] 日志输出失败(level=${level}): ${err?.message ?? err}\n`;
-        if (typeof process !== 'undefined' && process.stderr?.write) {
-          process.stderr.write(line);
-        } else {
-          globalThis.console.error(line);
-        }
-      } catch {
-        // 降级提示也失败：彻底放弃，不再抛出
-      }
+      // 尽力向 stderr 裸写一条降级提示；浏览器退回 console.error。
+      // 限流到「每错误码一次」——内部异常常是持续性的（如配置对象被写坏），
+      // 不限制会把 stderr 刷爆，反而淹没真正有用的信息。
+      warnOnce(
+        `emit-${err?.name ?? 'Error'}-${err?.code ?? ''}`,
+        `❌ [wb-logkit] 日志输出失败(level=${level}): ${err?.message ?? err}\n`
+      );
     }
   }
 
@@ -390,6 +391,10 @@ export class AppLogger {
    * 配置优先级：实例 options > 模块级环境变量规则 > 全局配置。
    * 门控顺序：环境门控（dev/prod）→ debug/trace 门控 → 级别门槛 → 通道级白名单过滤。
    * 其中「显式配置的通道级别（consoleLevel / file.level）」优先级高于全局 level 门槛。
+   *
+   * 两条通道都被拦下时的兜底（防「日志静默消失」）：
+   * - `fatal` 级别 → 无论通道开关如何，裸写一条 stderr（进程级故障不可丢失）
+   * - `log.file.*` 但文件通道关闭 → stderr 去重告警一次（配置矛盾，而非正常过滤）
    *
    * @param {string} level - 日志级别
    * @param {Array} args - 变参数组
@@ -486,8 +491,24 @@ export class AppLogger {
       toConsole = false;
     }
 
-    // 两条通道都被过滤掉：无需构造 record
-    if (!toConsole && !toFile) return;
+    // 两条通道都被过滤掉：无需完整构造 record，但要区分「正常门控过滤」与「配置错误」。
+    // - 常规级别过滤（门槛/白名单没放行）属正常行为，静默即可
+    // - 以下两种属**配置矛盾**，日志会静默消失，必须留痕（否则用户以为记上了）
+    if (!toConsole && !toFile) {
+      if (lv >= LEVELS.fatal) {
+        // fatal 语义是「进程级故障」，必须有一条保底出口：
+        // 即使控制台与文件被双双关闭，也要裸写 stderr（参考 traps.js 的 fd 2 兜底）
+        const { msg } = parseArgs(args);
+        writeRawStderr(`🚨 [${this.tag}] FATAL ${msg}\n`);
+      } else if (fileOnly && !fileOn) {
+        // log.file.* 要求写文件，但文件通道是关的 → 两头都没有，属配置矛盾
+        warnOnce(
+          'file-only-but-file-off',
+          `⚠️ [wb-logkit] 调用了 log.file.* 但文件通道未开启，日志已丢弃（tag=${this.tag}）；请开启 file 配置或改用普通级别方法\n`
+        );
+      }
+      return;
+    }
 
     const { msg, data, err } = parseArgs(args);
     const record = buildRecord(this.tag, level, msg, data, err);

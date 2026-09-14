@@ -42,13 +42,17 @@
  * @author yijiu2025
  * @since 2026-09-10
  */
+import { warnOnce } from './degraded.js';
 
 /**
  * 级别 → 数值映射（越小越详细）。
  *
- * **不变量**：数值必须严格升序单调（trace < debug < ... < fatal）。
- * `LEVEL_ORDER` 的排序、`parseLevelOpt` 的「该级别及以上」展开都依赖此性质，
- * 修改取值时必须保持单调，否则门控过滤会出错。
+ * **不变量**：数值必须严格升序单调（trace < debug < ... < fatal），且**两两不相等**。
+ * `LEVEL_ORDER` 的升序排序依赖单调性；`parseLevelOpt` 展开「该级别及以上」依赖
+ * 排序结果。若出现两个级别取值相同，排序结果退化为插入顺序（`Array#sort` 稳定），
+ * 白名单顺序将不再由严重程度决定——因此取值必须严格不等。
+ *
+ * 修改取值时必须保持此不变量，否则门控过滤与白名单展开都会出错。
  */
 export const LEVELS = Object.freeze({
   trace: 10,
@@ -71,6 +75,11 @@ export const LEVEL_ORDER = Object.freeze(Object.keys(LEVELS).sort((a, b) => LEVE
  *   - 单个级别名 'info'                  → 门槛语义：该级别及以上都记
  *   - 'all'                             → 全量：trace 起全记（等价门槛 trace）
  *   - 数组 ['info','error'] / 'info,error' → **白名单语义**：只记列出的级别
+ *
+ * ⚠️ **本函数是纯函数，非法值一律静默退化为 null（= 不设门槛）**。
+ * 因此 `parseLevelOpt('inf')`（拼错）与 `parseLevelOpt(undefined)`（没配）返回相同结果，
+ * 但语义相反：前者用户想做过滤，后者用户没打算过滤——方向刚好相反。
+ * `configureLog()` 内部改用 `validateLevelOpt()` 包装，会对非法值留一条 stderr 告警。
  *
  * @returns {string[]|null} 统一归一为"允许的级别名数组"：
  *   - 单个级别 / 'all' → 展开成白名单数组
@@ -111,6 +120,45 @@ export function parseLevelOpt(value) {
     return LEVEL_ORDER.filter(lv => LEVELS[lv] >= min);
   }
   return null;
+}
+
+/**
+ * 校验通道级级别配置，并把无法识别的部分**留痕**（供 configureLog 调用）。
+ *
+ * `parseLevelOpt` 是纯函数，非法值一律静默退化为 null（= 不设门槛）。这在
+ * 「配置拼错」时方向恰好相反——用户想做过滤，实际却全量输出，且毫无提示。
+ * 本函数只负责「检查 + 告警」，归一化结果仍以 `parseLevelOpt` 为准。
+ *
+ * @param {*} value - 待校验的原始配置值
+ * @param {string} where - 配置来源描述（用于告警文案，如 `'configureLog.consoleLevel'`）
+ * @returns {string[]|null} 与 parseLevelOpt(value) 完全一致的结果
+ */
+function validateLevelOpt(value, where) {
+  const allow = parseLevelOpt(value);
+  if (value === undefined || value === null || value === '') return allow;
+
+  // 收集所有"本应是合法级别名/关键字却无法识别"的 token
+  const rawTokens = Array.isArray(value)
+    ? value.map(v =>
+        String(v ?? '')
+          .trim()
+          .toLowerCase()
+      )
+    : String(value)
+        .toLowerCase()
+        .split(',')
+        .map(v => v.trim());
+  const KNOWN = new Set([...LEVEL_ORDER, 'all', '*', 'off', 'none', 'null', 'false']);
+  const invalid = rawTokens.filter(t => t && !KNOWN.has(t));
+
+  if (invalid.length) {
+    warnOnce(
+      `invalid-level-${where}-${invalid.join('|')}`,
+      `⚠️ [wb-logkit] ${where} 存在无法识别的级别名: ${invalid.join(', ')}；` +
+        `已按 ${allow ? JSON.stringify(allow) : '不设门槛（等于不过滤）'} 处理\n`
+    );
+  }
+  return allow;
 }
 
 /**
@@ -305,8 +353,20 @@ function buildConfig() {
 
   // configureLog() 编程覆盖（优先级高于环境变量）
   const o = runtimeOverrides;
-  if (o.level && Object.hasOwn(LEVELS, o.level)) cfg.level = o.level;
-  if (o.consoleLevel !== undefined) cfg.consoleLevel = parseLevelOpt(o.consoleLevel);
+  if (o.level !== undefined) {
+    // 环境变量路径已在上面做了 hasOwn 兜底，这里对编程入参额外留痕：
+    // 拼错的级别名不能静默忽略——用户会以为改了配置，实际还用着旧值
+    if (Object.hasOwn(LEVELS, o.level)) {
+      cfg.level = o.level;
+    } else {
+      warnOnce(
+        `invalid-global-level-${o.level}`,
+        `⚠️ [wb-logkit] configureLog({ level: ${JSON.stringify(o.level)} }) 非法级别名，已忽略；` +
+          `当前生效 level=${cfg.level}（合法值：${LEVEL_ORDER.join('/')}）\n`
+      );
+    }
+  }
+  if (o.consoleLevel !== undefined) cfg.consoleLevel = validateLevelOpt(o.consoleLevel, 'configureLog.consoleLevel');
   if (o.dir) {
     cfg.dir = o.dir;
     cfg.file.dir = o.dir;
@@ -316,7 +376,7 @@ function buildConfig() {
     cfg.file.name = o.fileName;
   }
   if (o.ext) cfg.file.ext = o.ext;
-  if (o.fileLevel !== undefined) cfg.file.level = parseLevelOpt(o.fileLevel);
+  if (o.fileLevel !== undefined) cfg.file.level = validateLevelOpt(o.fileLevel, 'configureLog.fileLevel');
   if (typeof o.fileDate === 'boolean') cfg.file.date = o.fileDate;
   if (typeof o.dateDir === 'boolean') cfg.file.dateDir = o.dateDir;
   if (o.subdir !== undefined) cfg.file.subdir = parseSubdirOpt(o.subdir);
@@ -342,7 +402,7 @@ function buildConfig() {
     if (merged.date !== undefined) merged.date = parseBoolOpt(merged.date) ?? true;
     if (merged.dateDir !== undefined) merged.dateDir = parseBool(merged.dateDir, false);
     if (merged.subdir !== undefined) merged.subdir = parseSubdirOpt(merged.subdir);
-    if (merged.level !== undefined) merged.level = parseLevelOpt(merged.level);
+    if (merged.level !== undefined) merged.level = validateLevelOpt(merged.level, 'configureLog.file.level');
     if (merged.error !== undefined && typeof merged.error !== 'boolean') {
       merged.error = parseBoolOpt(merged.error) ?? true;
     }
