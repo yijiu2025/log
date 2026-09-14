@@ -7,16 +7,24 @@
  *   import { createLogger } from 'wb-logkit';
  *   const log = createLogger('auth.session');   // tag 建议 = 文件路径点分
  *
- *  零配置快捷用法（不建 logger，直接打印）：
- *   import { log } from 'wb-logkit';
- *   log.info('...'); log.error('...');           // tag='app'，跟随全局配置
- *   log.config({ level: 'debug' });              // 也可对默认 logger 做配置
- *
- *   log.info('用户登录', { userId });           // 常规日志
+ *   log.info('用户登录', { userId });           // 常规日志（对象并入 data）
  *   log.warn('缓存降级', err);                  // 警告
- *   log.error('查询失败', err);                 // 错误（自动 stack）
- *   log.debug('缓存未命中', key);               // 调试：需 LOG_DEBUG=auth 或实例 debug:true
- *   log.fatal('进程级故障', err);               // 同步落盘（Node）
+ *   log.error('查询失败', err);                 // 错误（自动提取 stack）
+ *   log.debug('缓存未命中', key);               // 调试：需 LOG_DEBUG 关键词或实例 debug:true
+ *   log.fatal('进程级故障', err);               // 必输 + 同步落盘（Node）
+ *
+ *  ⚠️ createLogger **只有两个参数**：(tag, asGlobal)。其余配置一律走 config()。
+ *
+ *   // ① 注册为全局 log（入口文件执行一次），其他文件直接 import { log }
+ *   createLogger('app', true);
+ *
+ *   // ② 单模块配置（运行时热更新，可链式）
+ *   createLogger('pay').config({ level: 'debug', file: { name: 'pay', level: 'all' } });
+ *
+ *  零配置快捷用法（不建 logger，直接用全局 log；未注册时 tag='app'）：
+ *   import { log } from 'wb-logkit';
+ *   log.info('...'); log.error('...');           // 跟随全局配置
+ *   log.config({ level: 'debug' });              // 也可对全局 log 做配置
  *
  *  输出控制矩阵（两个正交维度，任意级别任意组合，顺序无关）：
  *   log.always.error('...')     必输（无视 LOG_LEVEL / LOG_DEBUG / 环境）
@@ -24,14 +32,6 @@
  *   log.prod.error('...')       仅生产环境
  *   log.dev.always.info('...')  组合：仅开发 + 必输
  *   log.file.info('...')        只写文件、不刷控制台（留档，仅 Node）
- *
- *  实例级配置（优先级最高）：
- *   const log = createLogger('pay', { level: 'debug', file: { name: 'pay' } });
- *   log.config({ level: 'warn' });              // 运行时更新
- *
- *  全局编程配置：
- *   import { configureLog } from 'wb-logkit';
- *   configureLog({ level: 'warn', fileName: 'server', debugKeywords: ['auth'] });
  *
  *  CLI 工具面向用户的结果输出用 stdout（无时间戳装饰）：
  *   import { logStdout as stdout } from 'wb-logkit';
@@ -42,10 +42,22 @@
  * ════════════════════════════════════════════════════════════════
  *   LOG_LEVEL=info                     全局最低级别
  *   LOG_DEBUG=auth,redis,firewall.*    debug/trace 白名单；'*' 放开全部
+ *   LOG_CONSOLE=true                   控制台开关（默认 true）
+ *   LOG_CONSOLE_LEVEL=warn             控制台通道级别（默认跟随 LOG_LEVEL）
+ *   LOG_FILE=false                     文件开关（**默认 false = 不写文件**，需显式开启）
+ *   LOG_FILE_LEVEL=all                 文件通道级别（默认跟随 LOG_LEVEL）
  *   LOG_DIR=logs                       文件目录
  *   LOG_FILE_NAME=app                  主日志文件名前缀
- *   LOG_CONSOLE=true / LOG_FILE=true   通道开关
+ *   LOG_FILE_EXT=.log                  文件扩展名
+ *   LOG_FILE_DATE=true                 文件名日期后缀（off = 单文件）
+ *   LOG_DATE_DIR=false                 日期作为子目录 logs/2026-09-12/app.log
+ *   LOG_SUBDIR=auto                    模块子目录：auto = 按 tag 首段分类；或固定目录名
+ *   LOG_ERROR_FILE=true                错误文件开关（off 关闭；或自定义前缀）
+ *   LOG_KEEP_DAYS=30                   滚动日志保留天数（0 = 不清理）
+ *   LOG_FILE_SUFFIX=pid                文件名后缀：pid = 进程号（多进程防行交错）
+ *   LOG_MAX_STR=2000                   单字段字符串长度上限（0 = 关闭截断）
  *   LOG_PRETTY=true                    控制台彩色可读
+ *   LOG_DEV=true                       dev 专属输出显示开关
  *   LOG_LEVEL_AUTH=info                模块级级别覆盖
  *   LOG_CONSOLE_REDIS=off              模块级控制台开关
  *   LOG_FILE_CLI=false                 模块级文件开关

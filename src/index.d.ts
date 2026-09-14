@@ -1,5 +1,8 @@
 /**
- * wb-log 类型定义（Node / 浏览器通用）
+ * wb-logkit 类型定义（Node / 浏览器通用）
+ *
+ * 与 `src/*.js` 的运行期实现保持同步；配置键的**单一事实来源**是此文件的
+ * `LoggerOptions` / `LogGlobalOptions`，`.js` 侧 JSDoc 仅作摘要引用。
  */
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';

@@ -1,7 +1,7 @@
 /**
  * Logger 核心：console 兼容的变参签名 + tag 化 debug 白名单 + 实例级配置
  *
- * 用法：
+ * 用法（**公开入口只有 createLogger(tag, asGlobal)，配置一律走 config()**）：
  *   import { createLogger } from 'wb-logkit';
  *   const log = createLogger('auth.session');
  *
@@ -10,20 +10,26 @@
  *   log.error('查询失败', err);                 // Error 自动提取 stack
  *   log.debug('缓存未命中', cacheKey);          // 仅当 LOG_DEBUG 关键词命中 tag 才输出
  *
- * 实例级配置（优先级高于模块级环境变量与全局配置）：
- *   const log = createLogger('pay', {
+ *   // 实例级配置（优先级高于模块级环境变量与全局配置），可随时热更新、可链式：
+ *   log.config({
  *     level: 'debug',            // 本模块最低级别
  *     console: true,             // 本模块控制台开关
- *     file: { name: 'pay' },     // 本模块独立文件 logs/pay-YYYY-MM-DD.log（Node）
+ *     consoleLevel: 'warn',      // 本模块控制台通道级别（只打 warn+）
+ *     file: {                    // 给对象即开启本模块文件通道（Node）
+ *       name: 'pay',             //   独立文件 logs/pay-YYYY-MM-DD.log
+ *       level: 'all'             //   文件记全量（含 debug/trace）
+ *     },
  *     debug: true                // 本模块 debug 免关键词直接输出
  *   });
- *   log.config({ level: 'warn' });   // 运行时更新，返回自身可链式
  *
  * 矩阵控制（两个正交维度，任意级别任意组合，顺序无关）：
  *   log.always.error(...)        必输
  *   log.dev.info(...)            仅开发
  *   log.prod.error(...)          仅生产
  *   log.file.info(...)           只写文件不进控制台
+ *
+ * 门控语义（重要）：全局 `level` 管的是「默认行为」，**显式配置的通道级别优先**。
+ * 例：写了 `file.level: 'all'`，即使全局 level=info，debug/trace 也会进文件。
  *
  * @author yijiu2025
  * @since 2026-09-10
@@ -37,6 +43,14 @@ import { consoleTransport, fileTransport } from './transports.js';
 
 /** 超长字符串截断后的标记模板（%d 会被替换为原始长度） */
 const TRUNCATE_MARK = '…(len=%d)';
+
+/**
+ * 发送选项（`_emit` / `_emitInner` 的第三参；传 `true` 等价 `{ force: true }`）。
+ * @typedef {object} EmitOpts
+ * @property {boolean} [force=false] 必输：绕过 LOG_LEVEL 与 LOG_DEBUG 门控
+ * @property {'dev'|'prod'|null} [env=null] 环境门控；null = 不限环境
+ * @property {boolean} [fileOnly=false] 只写文件、不刷控制台
+ */
 
 /**
  * 生成当前时间的本地时区 ISO 8601 字符串（如 2026-09-13T23:30:00.123+08:00）。
@@ -181,16 +195,19 @@ function buildRecord(tag, level, msg, data, err) {
 
 export class AppLogger {
   /**
-   * 创建模块 logger 实例。
+   * 创建模块 logger 实例（一般经 `createLogger(tag, asGlobal)` 创建，而非直接 new）。
+   *
    * @param {string} [tag='app'] 模块标签（一般是点分路径，如 'auth.session'）
-   * @param {object|null} [options=null] 实例级配置（优先级最高）
+   * @param {LoggerOptions|null} [options=null] 实例级配置（优先级最高）。
+   *        键定义以 `index.d.ts` 的 `LoggerOptions` 为单一事实来源，此处为摘要：
    *   - level: 'info'                    本模块最低级别
    *   - console: true|false              本模块控制台开关
+   *   - consoleLevel: 'warn'|'all'|[]    本模块控制台通道级别（覆盖全局 consoleLevel）
    *   - file: true|false|{...}           本模块文件开关 / 独立文件配置（仅 Node）
-   *       { name?, dir?, ext?, date?, error? }
-   *       name: 文件名前缀；dir: 目录；ext: 扩展名（默认 .log）
-   *       date: 是否带日期后缀（默认 true，false = 单文件不滚动）
-   *       error: 错误文件开关（默认 true）或自定义前缀字符串
+   *       · 给**对象即开启**本模块文件通道（即使全局未开启文件）
+   *       · 与全局 file 是**覆盖**关系而非叠加，因此不会重复写两份
+   *       · 对象键：name（默认 = tag）/ dir / ext / date / dateDir / subdir /
+   *         level（文件通道级别）/ keepDays / error / suffix
    *   - debug: true|false                true=本模块 debug 免关键词；false=强制静默
    */
   constructor(tag = 'app', options = null) {
@@ -225,11 +242,20 @@ export class AppLogger {
    * 构建"环境变体"：一个可调用对象（默认 info 级），同时携带全部级别方法，
    * 以及 always/dev/prod/file 组合选择器（顺序无关，后选覆盖前者）。
    *
+   * 结构（对应 `index.d.ts` 的 `LogVariant`）：
+   * - `fn(...args)` 等价 `fn.info(...args)`
+   * - `fn.trace` / `fn.debug` / `fn.info` / `fn.warn` / `fn.error` / `fn.fatal` 指定级别
+   * - `fn.always` / `fn.dev` / `fn.prod` / `fn.file` 为**不可枚举 getter**
+   *   （`Object.defineProperty` + `enumerable: false`），返回组合后的新变体；
+   *   因此 `Object.keys(fn)` / `JSON.stringify(fn)` 不会列出它们。
+   *
+   * 变体按 `env|force|fileOnly` 三元组缓存于 `_variantCache`，
+   * 同一组合重复访问返回同一函数对象。
+   *
    * @param {'dev'|'prod'|null} env - 环境门控；null = 不限环境
    * @param {boolean} force - true = 必输（绕过 LOG_LEVEL 与 LOG_DEBUG 门控）
    * @param {boolean} fileOnly - true = 只写文件、不进控制台
-   * @returns {Function} 可调用变体：fn(...args) = info 级；fn.trace~fn.fatal 指定级别；
-   *          fn.always / fn.dev / fn.prod / fn.file 为 getter，返回组合后的新变体
+   * @returns {LogVariant} 可调用变体（函数 + 6 个级别方法 + 4 个不可枚举门控 getter）
    */
   _variant(env, force, fileOnly) {
     const key = `${env ?? '*'}|${force ? 1 : 0}|${fileOnly ? 1 : 0}`;
@@ -337,7 +363,7 @@ export class AppLogger {
    * 裸写一条降级提示（浏览器退回 console.error）。
    * @param {string} level - 日志级别
    * @param {Array} args - 变参数组
-   * @param {object|boolean} [opts={}] true=强制输出；或 { force, env, fileOnly }
+   * @param {EmitOpts|boolean} [opts={}] 发送选项；传 true 等价 `{ force: true }`
    * @returns {void}
    */
   _emit(level, args, opts = {}) {
@@ -360,11 +386,14 @@ export class AppLogger {
 
   /**
    * _emit 的实际执行体（异常由 _emit 兜底捕获）。
-   * 配置优先级：实例 options > 模块级环境变量规则 > 全局配置；
-   * 门控顺序：环境门控（dev/prod）→ debug/trace 关键词门控 → 级别门槛。
+   *
+   * 配置优先级：实例 options > 模块级环境变量规则 > 全局配置。
+   * 门控顺序：环境门控（dev/prod）→ debug/trace 门控 → 级别门槛 → 通道级白名单过滤。
+   * 其中「显式配置的通道级别（consoleLevel / file.level）」优先级高于全局 level 门槛。
+   *
    * @param {string} level - 日志级别
    * @param {Array} args - 变参数组
-   * @param {object|boolean} [opts={}] true=强制输出；或 { force, env, fileOnly }
+   * @param {EmitOpts|boolean} [opts={}] 发送选项；传 true 等价 `{ force: true }`
    * @returns {void}
    */
   _emitInner(level, args, opts = {}) {

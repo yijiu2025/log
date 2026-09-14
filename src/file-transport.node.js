@@ -142,6 +142,15 @@ function stripAnsiDeep(value, depth = 4) {
   return value;
 }
 
+/**
+ * Node 文件通道实现（单例，非线程/多进程共享——多进程请配 `suffix: 'pid'` 分文件写入）。
+ *
+ * 职责：把一条 record 转为 JSON 行同步追加到目标文件；按需双写错误文件；
+ * 每天首次写入时清理过期日志。所有路径拼接都经 `safeSeg` + `isInside` 双重防线。
+ *
+ * 由 Node 入口 `index.node.js` 经 `setFileTransport()` 注入到 `transports.js`，
+ * 浏览器环境不会加载本文件。任何写入/清理失败**静默**（控制台通道不受影响）。
+ */
 class NodeFileTransport {
   constructor() {
     /** 相对目录 → 已确认创建的绝对路径（避免每条日志都 resolve + mkdirSync） */
@@ -309,12 +318,20 @@ class NodeFileTransport {
   }
 
   /**
-   * @param {object} record
-   * @param {object} cfg getLogConfig() 结果
-   * @param {boolean} [sync=false] 兼容参数（本通道本就同步写入）
-   * @param {object|null} [fileOpts=null] 实例级文件配置
-   *        { name?, dir?, ext?, date?, dateDir?, subdir?, error?, keepDays?, suffix? }
-   * @returns {void} 写入/双写错误文件/触发每日清理；任何失败静默（控制台通道仍工作）
+   * 写入入口（由 `logger._emitInner` 调用）。
+   *
+   * 流程：解析配置（实例 fileOpts 优先于全局 cfg.file）→ 解析目录/文件名 →
+   * 剥离 ANSI 颜色码 → 同步追加主日志 → warn+ 双写错误文件 → 触发每日清理。
+   * 整体 try/catch 静默：文件通道失败绝不影响业务与控制台输出。
+   *
+   * @param {object} record - 结构化日志记录（`buildRecord` 产物：{ t, level, tag, msg, ...data }）；
+   *        本函数会**原地剥离**其字符串中的 ANSI 颜色码（该对象为本次 emit 私有，安全）
+   * @param {object} cfg - `getLogConfig()` 结果（读全局 `fileEnabled` / `file.*`）
+   * @param {boolean} [sync=false] 兼容参数（本通道本就同步写入，无实际作用）
+   * @param {object|null} [fileOpts=null] 实例级文件配置（优先级最高）；
+   *        键：`{ name?, dir?, ext?, date?, dateDir?, subdir?, level?, keepDays?, error?, suffix? }`。
+   *        非 null 即为「实例明确要写文件」，全局 `fileEnabled=false` 时依然落盘。
+   * @returns {void} 任何失败静默（控制台通道仍工作）
    */
   write(record, cfg, sync = false, fileOpts = null) {
     // 全局文件通道关闭时，仍允许**实例级显式 file 配置**生效（实例优先级最高）：
@@ -379,6 +396,10 @@ class NodeFileTransport {
 
   /**
    * 兼容保留：同步写入无缓冲，无需刷盘。
+   *
+   * 保留原因是 `transports.js` 的文件通道契约要求实现同时提供
+   * `write()` 与 `close()`（`setFileTransport` 只校验 `write`，但进程退出前统一
+   * 调用 `close()` 的逻辑依赖此方法存在），因此不可删除。
    * @returns {void}
    */
   close() {}

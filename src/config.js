@@ -43,7 +43,13 @@
  * @since 2026-09-10
  */
 
-/** 级别数值：越小越详细 */
+/**
+ * 级别 → 数值映射（越小越详细）。
+ *
+ * **不变量**：数值必须严格升序单调（trace < debug < ... < fatal）。
+ * `LEVEL_ORDER` 的排序、`parseLevelOpt` 的「该级别及以上」展开都依赖此性质，
+ * 修改取值时必须保持单调，否则门控过滤会出错。
+ */
 export const LEVELS = Object.freeze({
   trace: 10,
   debug: 20,
@@ -53,13 +59,7 @@ export const LEVELS = Object.freeze({
   fatal: 60
 });
 
-/**
- * 解析宽松布尔值。
- * @param {*} value - 原始值（'1'/'true'/'yes'/'on' 视为 true，其余 false）
- * @param {boolean} defaultValue - 值缺失（undefined/null/''）时的默认值
- * @returns {boolean}
- */
-/** 级别按严重程度升序排列（与 LEVELS 数值一致；白名单展开用） */
+/** 级别名按严重程度升序排列（与 LEVELS 数值一致；白名单展开用）。冻结数组，只读。 */
 export const LEVEL_ORDER = Object.freeze(Object.keys(LEVELS).sort((a, b) => LEVELS[a] - LEVELS[b]));
 
 /**
@@ -124,6 +124,16 @@ export function levelPasses(allowList, level) {
   return allowList.includes(level);
 }
 
+/**
+ * 解析宽松布尔值（环境变量 / 编程入参通用）。
+ *
+ * 真值集合：`'1'` / `'true'` / `'yes'` / `'on'`（大小写不敏感、自动 trim）；
+ * 其余任何字符串（含 `'off'` / `'0'` / `'no'` / 无法识别的值）一律为 false。
+ *
+ * @param {*} value - 原始值
+ * @param {boolean} defaultValue - 值缺失（`undefined` / `null` / `''`）时的回退值
+ * @returns {boolean} 解析结果
+ */
 function parseBool(value, defaultValue) {
   if (value === undefined || value === null || value === '') return defaultValue;
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
@@ -131,8 +141,13 @@ function parseBool(value, defaultValue) {
 
 /**
  * 三态布尔解析：未配置返回 null（用于区分"未配置，走默认"与"显式配置"）。
+ *
+ * 与 `parseBool(value, defaultValue)` 的唯一区别：本函数**不接收默认值**，
+ * 值缺失（`undefined` / `null` / `''`）时返回 `null`，由调用方用 `??` 决定回退值
+ * （如 `parseBoolOpt(env.LOG_FILE_DATE) ?? true`）。
+ *
  * @param {*} value - 原始值
- * @returns {boolean|null} null = 未配置
+ * @returns {boolean|null} 解析结果；null = 未配置
  */
 function parseBoolOpt(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -391,8 +406,13 @@ export function resetLogConfig() {
 /**
  * 编程方式覆盖全局配置（优先级高于环境变量，热生效）。
  *
- * @param {object} patch 可用键：
+ * 调用是**累积合并**的：后一次 patch 只覆盖它显式写出的键，未写的键保持原值。
+ * 全部键均可选；未写出的键回退到环境变量或内置默认值。
+ *
+ * @param {object} [patch={}] 配置补丁，可用键：
  *   - level: 'info'            全局最低级别
+ *   - consoleLevel: 'warn'|'all'|['info','error']  控制台通道级别（null/不填 = 跟随 level）
+ *   - fileLevel: 'all'|['info','error']            文件通道级别（null/不填 = 跟随 level）
  *   - dir: 'logs'              文件目录（仅 Node）
  *   - fileName: 'app'          主日志文件名前缀（仅 Node）
  *   - ext: '.log'              文件扩展名（仅 Node）
@@ -403,15 +423,28 @@ export function resetLogConfig() {
  *   - keepDays: 30             滚动日志保留天数，0 关闭清理（仅 Node）
  *   - fileSuffix: 'pid'|'名'   文件名后缀：'pid' = 进程号；字符串原样；'' 无（仅 Node）
  *   - maxStr: 2000             单字段字符串长度上限（字符数），0 关闭截断
- *   - file: true|false|{name?,dir?,ext?,date?,dateDir?,subdir?,error?,keepDays?,suffix?}  文件总开关或文件配置对象（合并）
  *   - console: true|false      控制台总开关
  *   - pretty: true|false       控制台彩色可读 / JSON 行
  *   - showDev: true|false      dev 专属输出显示开关
  *   - debugKeywords: 'a,b'|['a'] debug/trace 白名单
- * @returns {object} 新配置
+ *   - file: true|false|{...}   文件通道开关 / 文件配置对象。
+ *        给 **对象即开启文件通道**（`fileEnabled = true`），对象内可用键与 `fileLevel`/
+ *        `dir`/`fileName`/`ext`/`fileDate`/`dateDir`/`subdir`/`fileError`/`keepDays`/
+ *        `fileSuffix` 同名（含 `name`/`date`/`error`/`suffix` 别名），另加 `level`（= fileLevel）。
+ *        `file: false` 显式关闭，优先级最高（即使同一 patch 里又写了对象）。
+ * @returns {object} 重建后的完整配置（冻结对象）
  *
  * @example
- *   configureLog({ level: 'warn', file: { name: 'server', date: false, ext: '.txt' } });
+ *   // 全局开启文件通道（含默认值），并让调试细节全量落盘
+ *   configureLog({ file: { name: 'app', level: 'all' } });
+ *
+ * @example
+ *   // 控制台只打 warn+，文件仍记 info+
+ *   configureLog({ consoleLevel: 'warn' });
+ *
+ * @example
+ *   // 单文件模式 + 自定义扩展名
+ *   configureLog({ file: { name: 'server', date: false, ext: '.txt' } });
  */
 export function configureLog(patch = {}) {
   runtimeOverrides = { ...runtimeOverrides, ...patch };

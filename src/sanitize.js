@@ -24,11 +24,19 @@ const SENSITIVE_PATTERNS = [
 const MASK = '***';
 
 /**
- * 对对象进行日志脱敏
- * @param {object} obj - 要脱敏的对象
- * @param {number} depth - 递归深度限制
- * @returns {object} 脱敏后的对象副本；超过深度限制的部分返回 '[maxDepth]' 占位符
- *                   （绝不透传未脱敏的原始对象，防止深层敏感字段泄露）
+ * 对对象进行日志脱敏（递归，返回副本，不修改入参）。
+ *
+ * 命中敏感模式的键其值替换为 `'***'`；嵌套对象/数组递归处理。
+ * 超过深度限制的节点整体替换为 `'[maxDepth]'` 字符串占位符 ——
+ * 绝不透传未脱敏的原始对象，防止深层敏感字段绕过脱敏泄露。
+ *
+ * 注意：只处理对象/数组参数的**字段**，`msg` 字符串不做脱敏
+ * （外部输入请先截断再入日志）。
+ *
+ * @param {*} obj - 要脱敏的值；非对象原样返回
+ * @param {number} [depth=3] - 剩余递归深度；归零时返回 '[maxDepth]'
+ * @returns {*} 脱敏后的副本：对象返回新对象、数组返回新数组、
+ *          深度耗尽返回字符串 '[maxDepth]'、非对象原样返回
  */
 function sanitizeForLog(obj, depth = 3) {
   if (!obj || typeof obj !== 'object') return obj;
