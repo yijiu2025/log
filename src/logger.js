@@ -396,6 +396,8 @@ export class AppLogger {
       fileOn = rule?.file ?? cfg.fileEnabled;
     }
 
+    const lv = LEVELS[level];
+
     // 通道级级别过滤（优先级：实例 > 全局）；null = 不限制
     // 归一为"允许的级别名数组"：'info' → info 及以上；'all' → 全部；
     // ['info','error'] → 仅这两个级别（白名单）
@@ -408,24 +410,34 @@ export class AppLogger {
     if (env === 'dev' && !cfg.showDev) return;
     if (env === 'prod' && !cfg.isProd) return;
 
-    const lv = LEVELS[level];
-    // debug/trace 是否经关键词/实例显式放开：放开时跳过通道级门槛，
-    // 因为 LOG_DEBUG 本身就是"我要看调试细节"的明确意图，不该再被通道门槛拦一次
+    const consoleExplicit = consoleAllow != null;
+    const fileExplicit = fileAllow != null;
+
+    // debug/trace 是否经关键词/实例显式放开：放开时跳过"常规级别门槛"，
+    // 因为 LOG_DEBUG 本身就是"我要看调试细节"的明确意图，不该再被门槛拦一次。
+    // 但**显式配置**的通道级级别（consoleLevel / file.level）优先级更高，仍然生效。
     let debugUnlocked = false;
 
     if (!force) {
-      // debug/trace 门控：实例 debug 三态 > 关键词白名单（LOG_DEBUG / LOG_DEBUG_<模块>）
       if (lv <= LEVELS.debug) {
+        // debug/trace 门控：实例 debug 三态 > 关键词白名单（LOG_DEBUG / LOG_DEBUG_<模块>）
         if (inst?.debug === true) {
           debugUnlocked = true;
         } else if (inst?.debug === false) {
           return;
         } else if (isDebugTagEnabled(this.tag, cfg.debugKeywords)) {
           debugUnlocked = true;
+        } else if (consoleExplicit || fileExplicit) {
+          // 用户显式写了通道级别（如 file.level='all' / consoleLevel='all'），
+          // 说明"我明确知道要什么"，交由下面的按通道判定，不再要求关键词
+          debugUnlocked = true;
         } else {
           return;
         }
-      } else if (lv < threshold) {
+      } else if (lv < threshold && !consoleExplicit && !fileExplicit) {
+        // 低于全局门槛且没有任何显式通道级别时，整体丢弃。
+        // 只要有显式通道级别（如 file.level='all'），就交由下面的按通道判定——
+        // 门槛管的是"默认行为"，不该否掉用户明确写下的配置。
         return;
       }
     }
@@ -433,10 +445,7 @@ export class AppLogger {
     // 通道级过滤：
     // - force（always）与 debug 关键词放行，跳过"常规级别门槛"
     // - 但用户**显式配置**的通道级级别（consoleLevel / file.level）优先级更高，仍生效
-    //   例：LOG_DEBUG=auth 放开 debug 看细节，同时 file.level=warn → 文件只留 warn+
-    const consoleExplicit = consoleAllow != null;
-    const fileExplicit = fileAllow != null;
-
+    //   例：file.level='all' → 即使全局 level=info，debug/trace 也进文件
     const consolePass = consoleExplicit ? levelPasses(consoleAllow, level) : force || debugUnlocked || lv >= threshold;
     const filePass = fileExplicit ? levelPasses(fileAllow, level) : force || debugUnlocked || lv >= threshold;
 
