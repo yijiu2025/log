@@ -194,6 +194,9 @@ createLogger('process').config({ file: { name: 'process', level: 'all', error: t
 | `'warn,error'` | 逗号串，等价于数组 |
 | `'off'` / `null` | 关闭该 channel |
 
+> **显式配置 > 全局门槛**：只要写了 `file.level`（如 `'all'`），它就**优先于全局 `level`**，连 `debug`/`trace` 也会落盘，不需要再配 `LOG_DEBUG`。
+> 全局 `level` 管的是「默认行为」——没写通道级别时才用它。一句话：**门槛管默认，显式配置说了算**。
+
 控制台对应 `consoleLevel`，写法完全一致（全局写在 `configureLog({ consoleLevel })`，单实例写 `createLogger(tag).config({ consoleLevel })`）。
 
 ### 避免重复记录
