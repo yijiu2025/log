@@ -36,6 +36,8 @@
  *  CLI 工具面向用户的结果输出用 stdout（无时间戳装饰）：
  *   import { logStdout as stdout } from 'wb-logkit';
  *   stdout('✔ 完成');
+ *  ⚠️ logStdout 只写 stdout（Node）/**不落盘**：不经过文件通道，LOG_FILE / file.level 全开也无文件输出，
+ *     且不受 LOG_LEVEL / LOG_CONSOLE 门控 —— 供「面向人的结果」用；需留档的日志请用 log.info/error。
  *
  * ════════════════════════════════════════════════════════════════
  *  环境变量（Node）
