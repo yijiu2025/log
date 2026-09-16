@@ -1,6 +1,12 @@
 # wb-logkit
 
 > 零依赖、Node / 浏览器通用的统一日志库。分级输出 · 必输/环境/文件矩阵控制 · 关键词调试 · 模块级配置 · 自动脱敏 · 按天/按模块分目录滚动文件。
+>
+> **本文档是 wb-logkit 的权威说明**（环境变量、配置项、API、文件规则以本文为准）。
+> 在本仓库（nodeServers）内使用时，还有一份面向本项目开发者的接入约定 ——
+> 见 [`src/framework/log/README.md`](../../src/framework/log/README.md)：
+> 那里讲 `configureLog` 在 `app.js` 的调用时机、全局 `log` 注册、ESLint `no-console` 约束、
+> `initLogErrorTraps()` 等**宿主接入**事项，不重复本文的配置细节。
 
 [![npm version](https://img.shields.io/npm/v/wb-logkit.svg)](https://www.npmjs.com/package/wb-logkit)
 [![license](https://img.shields.io/npm/l/wb-logkit.svg)](./LICENSE)
@@ -302,7 +308,7 @@ log.file.info('仅 Node 生效'); // 浏览器中安全 no-op
 - **上下文注入**：`setLogContextProvider()` 可注入 `requestId` / `userId`，请求内日志自动携带（核心字段 t/level/tag/msg/err 受保护，不会被 provider 覆盖）
 - **Error 提取**：传入 `Error` 自动提取 `message` + `stack`
 - **计时器**：`const done = log.time('dbQuery'); ...; done();` 自动输出耗时
-- **原始输出**：`import { logStdout as stdout } from 'wb-logkit'` 无时间戳装饰，适合 CLI 结果展示
+- **原始输出**：`import { logStdout as stdout } from 'wb-logkit'` 无时间戳装饰，适合 CLI 结果展示。**只写 stdout，不落盘**：不经过文件通道，`LOG_FILE` / `file.level` 全开也不受影响，也不受 `LOG_CONSOLE` / `LOG_LEVEL` 门控
 
 ## API 速查
 
@@ -316,7 +322,7 @@ log.file.info('仅 Node 生效'); // 浏览器中安全 no-op
 | `resetLogConfig()`                                              | 清空运行时覆盖并重载（测试隔离用）                            |
 | `parseLevelOpt(v)` / `levelPasses(list, level)` / `LEVEL_ORDER` | 等级白名单解析与判定工具                                      |
 | `AppLogger`                                                     | logger 类（可 `new` 或继承）                                  |
-| `logStdout` / `stdout`                                          | 无装饰原始输出                                                |
+| `logStdout` / `stdout`                                          | 无装饰原始输出（仅 stdout 直写，不落盘、不受任何开关门控）    |
 | `setLogContextProvider(fn)`                                     | 注入请求上下文                                                |
 | `sanitizeForLog` / `sanitizeUrl` / `sanitizeUserAgent`          | 脱敏工具                                                      |
 | `Logger`（默认导出）                                            | 兼容旧 API 的静态调用包装                                     |
