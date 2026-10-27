@@ -138,4 +138,7 @@ jobs:
       - name: 建 GitHub Release（正文为空，版本号即标题）
         uses: softprops/action-gh-release@v2
         with:
+          # workflow_dispatch 触发时 github.ref 是 main（非 tag），
+          # 必须显式传 tag_name，否则报「requires a tag」
+          tag_name: ${{ inputs.tag || github.ref_name }}
           body: "wb-logkit 稳定版发布。"
