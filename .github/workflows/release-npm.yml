@@ -1,0 +1,141 @@
+# ============================================================================
+# CD —— 打 tag 即发布 wb-logkit 到 npm
+#
+# 命名：按家族 CI 规范（fullstack-rules → ci-conventions.md §六），发布族一律
+#       `release-<target>.yml`；本仓发布目标是 npm 包 ⇒ release-npm.yml。
+#
+# 🔴 认证方式：**Trusted Publishing（OIDC）** —— 仓库里不放任何长期 token。
+#   npm CLI 检测到 OIDC 环境会自动使用它，取不到才回退找 token。
+#   一次性配置（在 npmjs.com，不是 GitHub）：
+#     wb-logkit 包页 → Settings → Trusted Publisher → Add trusted publisher
+#       Organization or user : yijiu2025
+#       Repository           : log
+#       Workflow filename    : release-npm.yml   ← 只文件名，必须带 .yml
+#       Environment          : 留空（本流程没用 GitHub environment）
+#       Allowed actions      : 必须勾选 **npm publish**
+#           ⚠️ 2026-09-03 之后新建的配置默认只给 `npm stage publish`；
+#              不勾 npm publish 的话，这条 workflow 会发不出去。
+#
+# 🔴 两条硬前提（由下面的「校验 OIDC 前置条件」步骤把关）：
+#   · `permissions: id-token: write` —— 没有它拿不到 OIDC token
+#   · npm CLI ≥ 11.5.1 且 Node ≥ 22.14.0 —— 版本不够时 OIDC **静默不生效**，
+#     npm 会回退去找 token，然后以 401 收场，报错信息完全指不到真正的原因。
+#
+# 🔴 provenance（SLSA 声明）：OIDC 环境下 npm publish 自动附带 provenance。
+#   验证只看 publish 日志的 provenance 两行（有 = OIDC 真生效；无 = 回退 token）。
+#
+# 触发方式：推 tag（`git tag v1.0.0 && git push origin v1.0.0`）；
+#   手动重跑用 workflow_dispatch 并填 tag 名 —— 脚本会校验 tag 与 package.json
+#   版本一致，不一致直接红（防止 tag 与源码版本漂移）。
+#
+# 本包是零依赖、零构建的纯源码包（main/types 直指 src/），无 install/build/test 步骤。
+# ============================================================================
+
+name: Publish npm
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（例 v1.0.0）；发布失败重跑时填同一个 tag'
+        required: true
+
+concurrency:
+  group: release-npm-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # 🔴 Trusted Publishing 必需：向 GitHub 申请 OIDC token
+  id-token: write
+
+jobs:
+  publish:
+    name: 发布 wb-logkit 到 npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 校验 tag 名（防 ref 注入）
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          echo "$INPUT_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::inputs.tag 必须形如 v1.2.3，收到「$INPUT_TAG」——拒绝 checkout 任意 ref"
+            exit 1
+          }
+          echo "tag 形态合法：$INPUT_TAG"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 校验 OIDC 前置条件
+        run: |
+          node -e "
+          const { execSync } = require('child_process');
+          const ge = (v, [a, b, c]) => {
+            const [x, y, z] = v.split('.').map(Number);
+            return x > a || (x === a && (y > b || (y === b && z >= c)));
+          };
+          let npmV = execSync('npm -v').toString().trim();
+          if (!ge(npmV, [11, 5, 1])) {
+            execSync('npm i -g npm@11.5.1', { stdio: 'inherit' });
+            npmV = execSync('npm -v').toString().trim();
+          }
+          if (!ge(npmV, [11, 5, 1])) {
+            console.error('::error::升级后 npm 仍是 ' + npmV + '（需 ≥ 11.5.1），OIDC 不会生效');
+            process.exit(1);
+          }
+          const nodeV = execSync('node -v').toString().trim().replace(/^v/, '');
+          if (!ge(nodeV, [22, 14, 0])) {
+            console.error('::error::node ' + nodeV + ' < 22.14.0（OIDC 要求）。改 setup-node 的 node-version');
+            process.exit(1);
+          }
+          if (!process.env.ACTIONS_ID_TOKEN_REQUEST_URL) {
+            console.error('::error::未检测到 OIDC 环境变量（ACTIONS_ID_TOKEN_REQUEST_URL）——permissions.id-token: write 缺失');
+            process.exit(1);
+          }
+          console.log('OIDC 前置 ✅ npm ' + npmV + ' / node ' + nodeV + ' / id-token=有');
+          "
+
+      - name: 校验 tag == package.json 版本
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::tag $TAG 与 package.json 版本 $VERSION 不一致（期望 $VERSION）——打错 tag 了？"
+            exit 1
+          fi
+          echo "tag $TAG == package.json $VERSION ✅"
+
+      - name: 发布到 npm（OIDC + provenance）
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          npm publish --provenance
+
+  github-release:
+    name: 建 GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: publish
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: 建 GitHub Release（正文为空，版本号即标题）
+        uses: softprops/action-gh-release@v2
+        with:
+          body: "wb-logkit 稳定版发布。"
